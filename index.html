@@ -871,82 +871,6 @@ The AI will automatically extract:
         </div>
     </div>
 
-    <!-- Edit Job Modal -->
-    <div class="modal-overlay" id="edit-modal">
-        <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
-            <div class="modal-header">
-                <h2><i class="fas fa-edit"></i> Edit Job</h2>
-                <button class="btn-close" id="btn-close-edit">&times;</button>
-            </div>
-            <div class="modal-body" style="padding: 24px;">
-                <form id="edit-form">
-                    <input type="hidden" id="edit-job-id">
-
-                    <div class="form-group">
-                        <label for="edit-company"><i class="fas fa-building"></i> Company *</label>
-                        <input type="text" id="edit-company" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-position"><i class="fas fa-briefcase"></i> Position *</label>
-                        <input type="text" id="edit-position" required>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group" style="flex: 1;">
-                            <label for="edit-location"><i class="fas fa-map-marker-alt"></i> Location</label>
-                            <input type="text" id="edit-location" placeholder="e.g. San Francisco, CA">
-                        </div>
-                        <div class="form-group" style="flex: 1;">
-                            <label for="edit-salary"><i class="fas fa-dollar-sign"></i> Salary</label>
-                            <input type="text" id="edit-salary" placeholder="e.g. $120k - $160k">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-remote"><i class="fas fa-laptop-house"></i> Work Type</label>
-                        <select id="edit-remote">
-                            <option value="">Not specified</option>
-                            <option value="Remote">Remote</option>
-                            <option value="Hybrid">Hybrid</option>
-                            <option value="On-site">On-site</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-applied-date"><i class="fas fa-calendar"></i> Applied Date</label>
-                        <input type="date" id="edit-applied-date">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-job-url"><i class="fas fa-link"></i> Job URL</label>
-                        <input type="url" id="edit-job-url" placeholder="https://...">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-job-description-raw"><i class="fas fa-align-left"></i> Raw Job Description</label>
-                        <textarea id="edit-job-description-raw" rows="6" placeholder="Paste the original job posting text..."></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-job-description-parsed"><i class="fas fa-file-alt"></i> Parsed Job Description</label>
-                        <textarea id="edit-job-description-parsed" rows="6" placeholder="AI-parsed/cleaned version..."></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit-notes"><i class="fas fa-sticky-note"></i> Notes</label>
-                        <textarea id="edit-notes" rows="3" placeholder="Your notes about this application..."></textarea>
-                    </div>
-
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" id="btn-cancel-edit">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Changes</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <!-- Resume Generation Settings Modal -->
     <div class="modal-overlay" id="resume-settings-modal" style="z-index: 1500;">
         <div class="modal" style="max-width: 800px;">
@@ -1258,16 +1182,16 @@ The AI will automatically extract:
                     </div>
                     <div class="job-actions">
                         ${!isArchived ? `
-                            <button class="btn-sm btn-secondary" onclick="quickStatus(${job.id}, 'applied')">Mark Applied</button>
-                            <button class="btn-sm btn-success" onclick="quickStatus(${job.id}, 'interview')">Interview</button>
-                            <button class="btn-sm btn-warning" onclick="quickStatus(${job.id}, 'offered')">Offer</button>
+                            <button class="btn-sm btn-secondary" onclick="event.stopPropagation(); quickStatus(${job.id}, 'applied')">Mark Applied</button>
+                            <button class="btn-sm btn-success" onclick="event.stopPropagation(); quickStatus(${job.id}, 'interview')">Interview</button>
+                            <button class="btn-sm btn-warning" onclick="event.stopPropagation(); quickStatus(${job.id}, 'offered')">Offer</button>
                         ` : ''}
                         ${hasGeneratedResume ? `
-                            <button class="btn-sm btn-primary" onclick="console.log('View Resume clicked for job:', ${job.id}); openResumeEditor(${job.id})" title="View/Edit Resume">
+                            <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openResumeEditor(${job.id})" title="View/Edit Resume">
                                 <i class="fas fa-file-alt"></i> View Resume
                             </button>
                         ` : !isArchived ? `
-                            <button class="btn-sm btn-info" onclick="generateResume(${job.id})" title="Generate Resume">
+                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateResume(${job.id})" title="Generate Resume">
                                 <i class="fas fa-magic"></i> Generate Resume
                             </button>
                         ` : ''}
@@ -2051,11 +1975,16 @@ The AI will automatically extract:
         window.openResumeEditor = function(jobId) {
             console.log('openResumeEditor called with jobId:', jobId);
             const job = jobs.find(j => j.id === jobId);
-            console.log('Found job:', job);
-            console.log('job.generated_resume:', job.generated_resume);
+            console.log('Found job:', job ? 'yes' : 'no');
             
-            if (!job || !job.generated_resume) {
-                console.log('No job or no generated_resume');
+            if (!job) {
+                console.log('No job found for id:', jobId);
+                alert('Job not found. Please refresh and try again.');
+                return;
+            }
+            
+            if (!job.generated_resume) {
+                console.log('No generated_resume');
                 alert('No generated resume found for this job. Please generate one first.');
                 return;
             }
@@ -2063,15 +1992,10 @@ The AI will automatically extract:
             currentEditingJobId = jobId;
 
             // Close resume settings modal if open
-            const resumeSettingsModal = document.getElementById('resume-settings-modal');
-            if (resumeSettingsModal && resumeSettingsModal.classList.contains('active')) {
-                console.log('Closing resume settings modal');
-                resumeSettingsModal.classList.remove('active');
+            const settingsModal = document.getElementById('resume-settings-modal');
+            if (settingsModal && settingsModal.classList.contains('active')) {
+                settingsModal.classList.remove('active');
             }
-
-            // Check modal element exists
-            console.log('resumeEditorModal element:', resumeEditorModal);
-            console.log('resumeEditorModal before:', resumeEditorModal.classList.contains('active'));
 
             document.getElementById('resume-editor-job-title').textContent = job.position;
             document.getElementById('resume-editor-company').textContent = job.company;
@@ -2080,7 +2004,6 @@ The AI will automatically extract:
             document.getElementById('resume-editor-content').value = resumeContent || '';
 
             resumeEditorModal.classList.add('active');
-            console.log('resumeEditorModal after:', resumeEditorModal.classList.contains('active'));
         };
 
         // Export resume to DOCX

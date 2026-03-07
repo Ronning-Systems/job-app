@@ -109,7 +109,7 @@ class OllamaAgent:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": 16000},
+            "options": {"temperature": temperature, "num_predict": 32000},
         }
 
         if system:
@@ -363,6 +363,13 @@ STRICT RULES:
 - Never make up education credentials not in the example resumes
 - If you are unsure whether something is in the example resumes, DO NOT include it
 
+MANDATORY COMPLETENESS REQUIREMENTS:
+- You MUST include EVERY SINGLE job/role listed in the example resumes - do not skip or condense any positions
+- You MUST include the complete Education section with ALL degrees, certifications, and training listed
+- If the example resumes list 5 jobs, include ALL 5 jobs - never truncate this list
+- If the example resumes list multiple degrees or certifications, include ALL of them
+- Do not cut off or abbreviate the work history - every role matters
+
 {example_resumes_section}
 
 TEMPLATE (formatting only - do not copy content):
@@ -371,7 +378,7 @@ TEMPLATE (formatting only - do not copy content):
 Job Description (use ONLY to tailor wording, not to invent experience):
 {job_desc_section}
 
-Output format: Plain text resume only. No JSON needed."""
+Output format: Plain text resume only. No JSON needed. Include ALL positions and ALL education."""
 
         try:
             response = await self.ollama.generate(prompt, temperature=0.7)
