@@ -1,3 +1,5 @@
 /.DS_Store
 /.env
 /.ruff_cache
+backend/job_tracker.db
+backend/backend.log
