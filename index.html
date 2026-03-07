@@ -1,0 +1,2169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobSync - Track Your Applications</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #3b82f6;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-500: #6b7280;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: var(--gray-900);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+            color: white;
+            padding: 30px;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        header p {
+            opacity: 0.8;
+            font-size: 0.95rem;
+        }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            gap: 16px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            background: rgba(255,255,255,0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            min-width: 120px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Action Bar */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            background: white;
+            padding: 4px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--gray-500);
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--gray-700);
+        }
+
+        .tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        /* Main Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--gray-700);
+        }
+
+        .card-header .count {
+            background: var(--gray-100);
+            color: var(--gray-700);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .card-content {
+            padding: 16px;
+        }
+
+        /* Job List */
+        .job-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .job-item {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 10px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .job-item:hover {
+            border-color: var(--primary);
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.1);
+        }
+
+        .job-item.archived {
+            opacity: 0.7;
+        }
+
+        .job-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .job-title {
+            font-weight: 600;
+            color: var(--gray-900);
+            font-size: 1rem;
+        }
+
+        .job-company {
+            color: var(--gray-500);
+            font-size: 0.9rem;
+            margin-top: 2px;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-applied { background: #dbeafe; color: #1e40af; }
+        .status-phone { background: #fef3c7; color: #92400e; }
+        .status-interview { background: #d1fae5; color: #065f46; }
+        .status-offer { background: #fce7f3; color: #9d174d; }
+        .status-rejected { background: #fee2e2; color: #991b1b; }
+        .status-accepted { background: #d1fae5; color: #065f46; }
+
+        .job-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.85rem;
+            color: var(--gray-500);
+        }
+
+        .job-meta span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .job-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-secondary {
+            background: var(--gray-200);
+            color: var(--gray-700);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-300);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--gray-500);
+        }
+
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .btn-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--gray-500);
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+        }
+
+        .btn-close:hover {
+            background: var(--gray-100);
+        }
+
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--gray-700);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 4px;
+            color: var(--gray-500);
+            font-size: 0.8rem;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        /* Modal sizes */
+        .modal-lg {
+            max-width: 700px;
+        }
+
+        /* Input Tabs */
+        .input-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 2px solid var(--gray-200);
+            padding-bottom: 0;
+        }
+
+        .input-tab {
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--gray-500);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-tab:hover {
+            color: var(--primary);
+        }
+
+        .input-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Parsing status */
+        .parsing-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #eff6ff;
+            border-radius: 8px;
+            margin-top: 20px;
+            color: #1e40af;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #bfdbfe;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Quick Actions */
+        .quick-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .quick-action-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--gray-300);
+            background: white;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quick-action-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        /* Detail Modal */
+        .job-detail-header {
+            margin-bottom: 24px;
+        }
+
+        .job-detail-header h3 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .job-detail-header .company {
+            color: var(--gray-500);
+            font-size: 1.1rem;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .detail-item {
+            background: var(--gray-50);
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .detail-item .label {
+            font-size: 0.8rem;
+            color: var(--gray-500);
+            margin-bottom: 4px;
+        }
+
+        .detail-item .value {
+            font-weight: 500;
+            color: var(--gray-900);
+        }
+
+        .notes-box {
+            background: var(--gray-50);
+            padding: 16px;
+            border-radius: 8px;
+            min-height: 100px;
+            color: var(--gray-700);
+            line-height: 1.6;
+        }
+
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .timeline-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+
+        .timeline-content {
+            flex: 1;
+        }
+
+        .timeline-date {
+            font-size: 0.8rem;
+            color: var(--gray-500);
+        }
+
+        .timeline-text {
+            font-size: 0.9rem;
+            color: var(--gray-700);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="header-content">
+            <h1><i class="fas fa-briefcase"></i> JobSync</h1>
+            <p>Track your job applications and stay organized</p>
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-value" id="stat-total">12</span>
+                    <span class="stat-label">Total</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-active">8</span>
+                    <span class="stat-label">Active</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-interviews">3</span>
+                    <span class="stat-label">Interviews</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-offers">1</span>
+                    <span class="stat-label">Offers</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div class="action-bar">
+            <div class="tabs">
+                <button class="tab active" data-filter="all">All</button>
+                <button class="tab" data-filter="active">Active</button>
+                <button class="tab" data-filter="interview">Interviewing</button>
+                <button class="tab" data-filter="offer">Offers</button>
+                <button class="tab" data-filter="archived">Archived</button>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <button class="btn btn-secondary" id="btn-resume-settings" title="Resume Settings">
+                    <i class="fas fa-cog"></i> Resume Settings
+                </button>
+                <button class="btn btn-primary" id="btn-add-job">
+                    <i class="fas fa-plus"></i> Add Job to Tracker
+                </button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Active Applications -->
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-rocket"></i> Active Applications</h2>
+                    <span class="count" id="active-count">8</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="activeJobs">
+                        <!-- Job items will be populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Archived Applications -->
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-archive"></i> Archived</h2>
+                    <span class="count" id="archived-count">4</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="archivedJobs">
+                        <!-- Archived job items -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Job Modal -->
+    <div class="modal-overlay" id="job-modal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Job to Tracker</h2>
+                <button class="btn-close" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="job-form">
+                    <input type="hidden" id="job-id">
+
+                    <div class="form-group">
+                        <label for="job-url">
+                            <i class="fas fa-link"></i> Job Posting URL (Optional)
+                        </label>
+                        <input type="url" id="job-url" placeholder="https://... (for your reference)">
+                        <small>Save the job posting URL so you can quickly return to the application page.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="job-text">
+                            <i class="fas fa-align-left"></i> Job Description *
+                        </label>
+                        <textarea id="job-text" rows="12" placeholder="Paste the full job description here...
+
+The AI will automatically extract:
+• Company name
+• Job title
+• Location
+• Salary
+• Required skills
+• Key responsibilities"></textarea>
+                        <small>Required. Paste the complete job description text. The AI will parse and extract the details.</small>
+                    </div>
+
+                    <div class="parsing-status" id="parsing-status" style="display: none;">
+                        <div class="spinner"></div>
+                        <span>AI is analyzing the job description...</span>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-job">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Job</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Detail Modal -->
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Application Details</h2>
+                <button class="btn-close" id="btn-close-detail">&times;</button>
+            </div>
+            <div class="modal-body" id="detail-content">
+                <!-- Detail content populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="btn-delete">Delete</button>
+                <button class="btn btn-secondary" id="btn-edit">Edit</button>
+                <button class="btn btn-primary" id="btn-archive-toggle">Archive</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Job Modal -->
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> Edit Job</h2>
+                <button class="btn-close" id="btn-close-edit">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <form id="edit-form">
+                    <input type="hidden" id="edit-job-id">
+
+                    <div class="form-group">
+                        <label for="edit-company"><i class="fas fa-building"></i> Company *</label>
+                        <input type="text" id="edit-company" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-position"><i class="fas fa-briefcase"></i> Position *</label>
+                        <input type="text" id="edit-position" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-location"><i class="fas fa-map-marker-alt"></i> Location</label>
+                        <input type="text" id="edit-location" placeholder="e.g., San Francisco, CA or Remote">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-salary"><i class="fas fa-dollar-sign"></i> Salary</label>
+                        <input type="text" id="edit-salary" placeholder="e.g., $120k - $160k">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-remote"><i class="fas fa-laptop-house"></i> Work Type</label>
+                        <select id="edit-remote">
+                            <option value="">Not specified</option>
+                            <option value="Remote">Remote</option>
+                            <option value="Hybrid">Hybrid</option>
+                            <option value="On-site">On-site</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-url"><i class="fas fa-link"></i> Job URL</label>
+                        <input type="url" id="edit-job-url" placeholder="https://...">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-applied-date"><i class="fas fa-calendar"></i> Applied Date</label>
+                        <input type="date" id="edit-applied-date">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-stage"><i class="fas fa-tasks"></i> Stage</label>
+                        <select id="edit-stage">
+                            <option value="saved">Saved</option>
+                            <option value="applied">Applied</option>
+                            <option value="phone_screen">Phone Screen</option>
+                            <option value="interview">Interview</option>
+                            <option value="executive_call">Executive Call</option>
+                            <option value="offered">Offered</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="withdrawn">Withdrawn</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-description-raw"><i class="fas fa-align-left"></i> Job Description (Raw)</label>
+                        <textarea id="edit-job-description-raw" rows="6" placeholder="Original job posting text"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-description-parsed"><i class="fas fa-magic"></i> Job Description (Parsed/Cleaned)</label>
+                        <textarea id="edit-job-description-parsed" rows="6" placeholder="Cleaned/parsed version"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-notes"><i class="fas fa-sticky-note"></i> Notes</label>
+                        <textarea id="edit-notes" rows="4" placeholder="Your notes about this application"></textarea>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-edit">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Job Modal -->
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> Edit Job</h2>
+                <button class="btn-close" id="btn-close-edit">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <form id="edit-form">
+                    <input type="hidden" id="edit-job-id">
+
+                    <div class="form-group">
+                        <label for="edit-company"><i class="fas fa-building"></i> Company *</label>
+                        <input type="text" id="edit-company" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-position"><i class="fas fa-briefcase"></i> Position *</label>
+                        <input type="text" id="edit-position" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-location"><i class="fas fa-map-marker-alt"></i> Location</label>
+                            <input type="text" id="edit-location" placeholder="e.g. San Francisco, CA">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-salary"><i class="fas fa-dollar-sign"></i> Salary</label>
+                            <input type="text" id="edit-salary" placeholder="e.g. $120k - $160k">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-remote"><i class="fas fa-laptop-house"></i> Work Type</label>
+                        <select id="edit-remote">
+                            <option value="">Not specified</option>
+                            <option value="Remote">Remote</option>
+                            <option value="Hybrid">Hybrid</option>
+                            <option value="On-site">On-site</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-applied-date"><i class="fas fa-calendar"></i> Applied Date</label>
+                        <input type="date" id="edit-applied-date">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-url"><i class="fas fa-link"></i> Job URL</label>
+                        <input type="url" id="edit-job-url" placeholder="https://...">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-description-raw"><i class="fas fa-align-left"></i> Raw Job Description</label>
+                        <textarea id="edit-job-description-raw" rows="6" placeholder="Paste the original job posting text..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-job-description-parsed"><i class="fas fa-file-alt"></i> Parsed Job Description</label>
+                        <textarea id="edit-job-description-parsed" rows="6" placeholder="AI-parsed/cleaned version..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-notes"><i class="fas fa-sticky-note"></i> Notes</label>
+                        <textarea id="edit-notes" rows="3" placeholder="Your notes about this application..."></textarea>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-edit">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resume Generation Settings Modal -->
+    <div class="modal-overlay" id="resume-settings-modal" style="z-index: 1500;">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-cog"></i> Resume Generation Settings</h2>
+                <button class="btn-close" id="btn-close-resume-settings">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <div class="resume-settings-section">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 16px; color: var(--gray-800);">
+                        <i class="fas fa-file-alt" style="color: var(--primary);"></i> Example Resumes
+                    </h3>
+                    <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
+                        Upload resumes you've used successfully. These help the AI understand your style and format preferences.
+                    </p>
+                    <div class="file-upload-zone" id="example-resumes-zone" style="border: 2px dashed var(--gray-300); border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; color: var(--primary); margin-bottom: 8px;"></i>
+                        <p>Drag & drop example resumes here or click to browse</p>
+                        <small style="color: var(--gray-500);">Supports: PDF, DOCX, TXT (Max 5MB each)</small>
+                        <input type="file" id="example-resumes-input" multiple accept=".pdf,.docx,.txt" style="display: none;">
+                    </div>
+                    <div class="file-list" id="example-resumes-list" style="margin-top: 12px;"></div>
+                </div>
+
+                <div class="resume-settings-section" style="margin-top: 24px;">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 16px; color: var(--gray-800);">
+                        <i class="fas fa-file-code" style="color: var(--primary);"></i> Resume Template
+                    </h3>
+                    <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
+                        Upload a DOCX template that will be used to format your generated resumes.
+                    </p>
+                    <div class="file-upload-zone" id="template-zone" style="border: 2px dashed var(--gray-300); border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-file-word" style="font-size: 2rem; color: var(--info); margin-bottom: 8px;"></i>
+                        <p>Drag & drop your resume template here or click to browse</p>
+                        <small style="color: var(--gray-500);">Supports: DOCX only (Max 10MB)</small>
+                        <input type="file" id="template-input" accept=".docx" style="display: none;">
+                    </div>
+                    <div class="file-list" id="template-list" style="margin-top: 12px;"></div>
+                </div>
+
+                <div class="resume-settings-section" style="margin-top: 24px;">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-resume-settings">Cancel</button>
+                <button class="btn btn-primary" id="btn-save-resume-settings">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resume Editor Modal -->
+    <div class="modal-overlay" id="resume-editor-modal" style="z-index: 2000;">
+        <div class="modal" style="max-width: 900px; height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> Edit Resume</h2>
+                <button class="btn-close" id="btn-close-resume-editor">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; padding: 0; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="padding: 16px 24px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <span style="font-weight: 500; color: var(--gray-700);">Job:</span>
+                        <span id="resume-editor-job-title" style="color: var(--primary); font-weight: 600;"></span>
+                        <span style="color: var(--gray-400);">|</span>
+                        <span id="resume-editor-company" style="color: var(--gray-600);"></span>
+                    </div>
+                </div>
+                <textarea id="resume-editor-content" style="flex: 1; width: 100%; padding: 24px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none;"></textarea>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button class="btn btn-secondary" id="btn-cancel-resume-editor">Close</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" id="btn-regenerate-resume">
+                        <i class="fas fa-sync-alt"></i> Regenerate
+                    </button>
+                    <button class="btn btn-success" id="btn-export-resume">
+                        <i class="fas fa-file-word"></i> Export DOCX
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DOCX Library -->
+    <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+
+    <script>
+        // Resume settings storage
+        let resumeSettings = JSON.parse(localStorage.getItem('resumeSettings')) || {
+            exampleResumes: [],
+            templateFile: null
+        };
+
+        let currentEditingJobId = null;
+
+        // Sample data
+        let jobs = [
+            {
+                id: 1,
+                company: 'TechCorp Inc.',
+                position: 'Senior Frontend Developer',
+                location: 'San Francisco, CA',
+                salary: '$120k - $160k',
+                status: 'interview',
+                date: '2024-01-15',
+                url: 'https://example.com/job/1',
+                notes: 'Had initial phone screen. Technical interview scheduled for next week.',
+                archived: false,
+                history: [
+                    { date: '2024-01-15', text: 'Application submitted' },
+                    { date: '2024-01-18', text: 'Phone screen completed' },
+                    { date: '2024-01-22', text: 'Technical interview scheduled' }
+                ]
+            },
+            {
+                id: 2,
+                company: 'StartupXYZ',
+                position: 'Full Stack Engineer',
+                location: 'Remote',
+                salary: '$100k - $140k',
+                status: 'applied',
+                date: '2024-01-20',
+                url: 'https://example.com/job/2',
+                notes: 'Applied through LinkedIn. Waiting for response.',
+                archived: false,
+                history: [
+                    { date: '2024-01-20', text: 'Application submitted' }
+                ]
+            },
+            {
+                id: 3,
+                company: 'BigTech Co.',
+                position: 'Frontend Developer',
+                location: 'New York, NY',
+                salary: '$130k - $170k',
+                status: 'offer',
+                date: '2024-01-10',
+                url: 'https://example.com/job/3',
+                notes: 'Received offer! Negotiating salary.',
+                archived: false,
+                history: [
+                    { date: '2024-01-10', text: 'Application submitted' },
+                    { date: '2024-01-12', text: 'Phone screen completed' },
+                    { date: '2024-01-17', text: 'Technical interview completed' },
+                    { date: '2024-01-25', text: 'Offer received' }
+                ]
+            },
+            {
+                id: 4,
+                company: 'Design Studio',
+                position: 'UI Engineer',
+                location: 'Austin, TX',
+                salary: '$90k - $120k',
+                status: 'rejected',
+                date: '2024-01-05',
+                url: 'https://example.com/job/4',
+                notes: 'Received rejection email. Position filled internally.',
+                archived: true,
+                history: [
+                    { date: '2024-01-05', text: 'Application submitted' },
+                    { date: '2024-01-15', text: 'Application rejected' }
+                ]
+            }
+        ];
+
+        let currentFilter = 'all';
+        let currentJobId = null;
+
+        // DOM Elements
+        const jobModal = document.getElementById('job-modal');
+        const detailModal = document.getElementById('detail-modal');
+        const editModal = document.getElementById('edit-modal');
+        const jobForm = document.getElementById('job-form');
+        const editForm = document.getElementById('edit-form');
+
+        // API Base URL
+        const API_URL = window.location.hostname === 'jobsync.ronning.systems'
+            ? 'https://jobsync.ronning.systems/api'
+            : 'http://localhost:8000/api';
+
+        // Status mapping for the 9 stages
+        const statusLabels = {
+            saved: 'Saved',
+            applied: 'Applied',
+            phone_screen: 'Phone Screen',
+            interview: 'Interview',
+            executive_call: 'Executive Call',
+            offered: 'Offered',
+            rejected: 'Rejected',
+            withdrawn: 'Withdrawn',
+            closed: 'Closed'
+        };
+
+        const statusClasses = {
+            saved: 'status-applied',
+            applied: 'status-applied',
+            phone_screen: 'status-phone',
+            interview: 'status-interview',
+            executive_call: 'status-interview',
+            offered: 'status-offer',
+            rejected: 'status-rejected',
+            withdrawn: 'status-rejected',
+            closed: 'status-rejected'
+        };
+
+        // Fetch jobs from API
+        async function fetchJobs() {
+            try {
+                const response = await fetch(`${API_URL}/jobs`);
+                if (!response.ok) throw new Error('Failed to fetch jobs');
+                const data = await response.json();
+                jobs = data;
+                renderJobs();
+            } catch (error) {
+                console.error('Error fetching jobs:', error);
+                // Fallback to local data for demo
+            }
+        }
+
+        // Fetch stats from API
+        async function fetchStats() {
+            try {
+                const response = await fetch(`${API_URL}/stats`);
+                if (!response.ok) throw new Error('Failed to fetch stats');
+                const stats = await response.json();
+
+                document.getElementById('stat-total').textContent = stats.total || 0;
+                document.getElementById('stat-active').textContent = stats.active || 0;
+                document.getElementById('stat-interviews').textContent = stats.interviews || 0;
+                document.getElementById('stat-offers').textContent = stats.offers || 0;
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+
+        // Render jobs
+        function renderJobs() {
+            const activeContainer = document.getElementById('activeJobs');
+            const archivedContainer = document.getElementById('archivedJobs');
+
+            // Consider "saved", "applied", "phone_screen", "interview", "executive_call", "offered" as active
+            // Consider "rejected", "withdrawn", "closed" as archived
+            let activeJobs = jobs.filter(j =>
+                ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
+            );
+            let archivedJobs = jobs.filter(j =>
+                ['rejected', 'withdrawn', 'closed'].includes(j.stage)
+            );
+
+            // Apply filter
+            if (currentFilter !== 'all' && currentFilter !== 'archived') {
+                activeJobs = activeJobs.filter(j => {
+                    if (currentFilter === 'active') return ['saved', 'applied', 'phone_screen', 'interview', 'executive_call'].includes(j.stage);
+                    if (currentFilter === 'interview') return ['interview', 'executive_call'].includes(j.stage);
+                    if (currentFilter === 'offer') return j.stage === 'offered';
+                    return true;
+                });
+            }
+
+            // Render active
+            activeContainer.innerHTML = activeJobs.length ? activeJobs.map(job => renderJobItem(job)).join('') : `
+                <div class="empty-state">
+                    <i class="fas fa-inbox"></i>
+                    <p>No active applications</p>
+                </div>
+            `;
+
+            // Render archived
+            archivedContainer.innerHTML = archivedJobs.length ? archivedJobs.map(job => renderJobItem(job)).join('') : `
+                <div class="empty-state">
+                    <i class="fas fa-archive"></i>
+                    <p>No archived applications</p>
+                </div>
+            `;
+
+            // Update counts
+            document.getElementById('active-count').textContent = activeJobs.length;
+            document.getElementById('archived-count').textContent = archivedJobs.length;
+
+            // Update stats
+            updateStats();
+
+            // Add click handlers
+            document.querySelectorAll('.job-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (!e.target.closest('.job-actions')) {
+                        showDetail(parseInt(item.dataset.id));
+                    }
+                });
+            });
+        }
+
+        function renderJobItem(job) {
+            const statusClass = statusClasses[job.stage] || 'status-applied';
+            const isArchived = ['rejected', 'withdrawn', 'closed'].includes(job.stage);
+            const hasGeneratedResume = job.generated_resume && (typeof job.generated_resume === 'string' ? job.generated_resume.trim() : (job.generated_resume.content && job.generated_resume.content.trim()));
+            console.log('Rendering job:', job.id, 'generated_resume:', hasGeneratedResume, job.generated_resume ? 'exists' : 'null');
+            return `
+                <div class="job-item ${isArchived ? 'archived' : ''}" data-id="${job.id}">
+                    <div class="job-main">
+                        <div>
+                            <div class="job-title">${job.position}</div>
+                            <div class="job-company">${job.company}</div>
+                        </div>
+                        <span class="status-badge ${statusClass}">${statusLabels[job.stage] || job.stage}</span>
+                    </div>
+                    <div class="job-meta">
+                        <span><i class="fas fa-map-marker-alt"></i> ${job.location || 'N/A'}</span>
+                        <span><i class="fas fa-calendar"></i> ${formatDate(job.applied_date || job.created_at)}</span>
+                        ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${job.remote}</span>` : ''}
+                    </div>
+                    <div class="job-actions">
+                        ${!isArchived ? `
+                            <button class="btn-sm btn-secondary" onclick="quickStatus(${job.id}, 'applied')">Mark Applied</button>
+                            <button class="btn-sm btn-success" onclick="quickStatus(${job.id}, 'interview')">Interview</button>
+                            <button class="btn-sm btn-warning" onclick="quickStatus(${job.id}, 'offered')">Offer</button>
+                        ` : ''}
+                        ${hasGeneratedResume ? `
+                            <button class="btn-sm btn-primary" onclick="console.log('View Resume clicked for job:', ${job.id}); openResumeEditor(${job.id})" title="View/Edit Resume">
+                                <i class="fas fa-file-alt"></i> View Resume
+                            </button>
+                        ` : !isArchived ? `
+                            <button class="btn-sm btn-info" onclick="generateResume(${job.id})" title="Generate Resume">
+                                <i class="fas fa-magic"></i> Generate Resume
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function updateStats() {
+            // Trigger async stats fetch
+            fetchStats();
+        }
+
+        // Quick status update
+        window.quickStatus = async function(id, status) {
+            try {
+                const response = await fetch(`${API_URL}/jobs/${id}/stage`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stage: status })
+                });
+                if (!response.ok) throw new Error('Failed to update status');
+                await fetchJobs();
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        };
+
+        // Show detail modal
+        async function showDetail(id) {
+            const job = jobs.find(j => j.id === id);
+            if (!job) return;
+
+            currentJobId = id;
+            const content = document.getElementById('detail-content');
+
+            // Show loading state
+            content.innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <div class="spinner"></div>
+                    <p>Loading job details...</p>
+                </div>
+            `;
+            detailModal.classList.add('active');
+
+            // Fetch full job details
+            let fullJob;
+            try {
+                const response = await fetch(`${API_URL}/jobs/${id}`);
+                if (!response.ok) throw new Error('Failed to fetch job details');
+                fullJob = await response.json();
+            } catch (error) {
+                console.error('Error fetching job details:', error);
+                // Fallback to list data if fetch fails
+                fullJob = job;
+            }
+
+            const statusClass = statusClasses[fullJob.stage] || 'status-applied';
+            content.innerHTML = `
+                <div class="job-detail-header">
+                    <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || fullJob.stage}</span>
+                    <h3>${fullJob.position}</h3>
+                    <div class="company">${fullJob.company}</div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>Details</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="label">Location</div>
+                            <div class="value">${fullJob.location || 'Not specified'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">Salary</div>
+                            <div class="value">${fullJob.salary || 'Not specified'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">Applied Date</div>
+                            <div class="value">${formatDate(fullJob.applied_date)}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">Job URL</div>
+                            <div class="value">${fullJob.job_url ? `<a href="${fullJob.job_url}" target="_blank">View Posting</a>` : 'N/A'}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>Job Description</h4>
+                    ${(() => {
+                        // Try parsed description first, fallback to raw
+                        const desc = fullJob.job_description_parsed || fullJob.job_description_raw;
+                        if (desc && desc.trim()) {
+                            return `<div style="color: var(--gray-600); white-space: pre-wrap; line-height: 1.6;">${desc}</div>`;
+                        }
+                        return `<div style="color: var(--gray-500); font-style: italic;">No job description available.</div>`;
+                    })()}
+                </div>
+
+                <div class="detail-section">
+                    <h4>Requirements</h4>
+                    ${(() => {
+                        // Normalize requirements data
+                        let reqs = fullJob.requirements;
+                        if (!reqs || typeof reqs !== 'object') {
+                            reqs = { must_have: [], nice_to_have: [] };
+                        }
+                        // Handle array format
+                        if (Array.isArray(reqs)) {
+                            reqs = { must_have: reqs, nice_to_have: [] };
+                        }
+                        // Ensure arrays exist
+                        const mustHave = Array.isArray(reqs.must_have) ? reqs.must_have : [];
+                        const niceToHave = Array.isArray(reqs.nice_to_have) ? reqs.nice_to_have : [];
+
+                        if (mustHave.length === 0 && niceToHave.length === 0) {
+                            return `<div style="color: var(--gray-500); font-style: italic;">No requirements parsed.</div>`;
+                        }
+
+                        return `
+                            ${mustHave.length ? `
+                            <div style="margin-bottom: 12px;">
+                                <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Must Have:</div>
+                                <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
+                                    ${mustHave.map(r => `<li>${r}</li>`).join('')}
+                                </ul>
+                            </div>
+                            ` : ''}
+                            ${niceToHave.length ? `
+                            <div>
+                                <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Nice to Have:</div>
+                                <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
+                                    ${niceToHave.map(r => `<li>${r}</li>`).join('')}
+                                </ul>
+                            </div>
+                            ` : ''}
+                        `;
+                    })()}
+                </div>
+
+                <div class="detail-section">
+                    <h4>Key Responsibilities</h4>
+                    ${(() => {
+                        // Normalize responsibilities data
+                        let resp = fullJob.responsibilities;
+                        if (!resp) {
+                            return `<div style="color: var(--gray-500); font-style: italic;">No responsibilities parsed.</div>`;
+                        }
+                        // Ensure it's an array
+                        if (typeof resp === 'string') {
+                            resp = [resp];
+                        }
+                        if (!Array.isArray(resp) || resp.length === 0) {
+                            return `<div style="color: var(--gray-500); font-style: italic;">No responsibilities parsed.</div>`;
+                        }
+                        return `
+                            <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
+                                ${resp.map(r => `<li style="margin-bottom: 4px;">${r}</li>`).join('')}
+                            </ul>
+                        `;
+                    })()}
+                </div>
+
+                <div class="detail-section">
+                    <h4>Keywords</h4>
+                    ${(() => {
+                        // Normalize keywords data
+                        let kw = fullJob.keywords;
+                        if (!kw) {
+                            return `<div style="color: var(--gray-500); font-style: italic;">No keywords extracted.</div>`;
+                        }
+                        // Ensure it's an array
+                        if (typeof kw === 'string') {
+                            kw = [kw];
+                        }
+                        if (!Array.isArray(kw) || kw.length === 0) {
+                            return `<div style="color: var(--gray-500); font-style: italic;">No keywords extracted.</div>`;
+                        }
+                        return `
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+                                ${kw.map(k => `<span style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">${k}</span>`).join('')}
+                            </div>
+                        `;
+                    })()}
+                </div>
+
+                <!-- Debug: Raw Data (hidden by default, can be toggled) -->
+                <div class="detail-section" style="background: var(--gray-100); border: 1px dashed var(--gray-400);">
+                    <h4 style="cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                        <i class="fas fa-bug"></i> Debug Data (click to toggle)
+                    </h4>
+                    <div style="display: none; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: var(--gray-700); background: white; padding: 12px; border-radius: 4px; max-height: 300px; overflow-y: auto;">
+<strong>job_description_parsed:</strong> ${fullJob.job_description_parsed ? 'present (' + fullJob.job_description_parsed.length + ' chars)' : 'MISSING'}
+<strong>job_description_raw:</strong> ${fullJob.job_description_raw ? 'present (' + fullJob.job_description_raw.length + ' chars)' : 'MISSING'}
+<strong>requirements:</strong> ${JSON.stringify(fullJob.requirements, null, 2)}
+<strong>responsibilities:</strong> ${JSON.stringify(fullJob.responsibilities, null, 2)}
+<strong>keywords:</strong> ${JSON.stringify(fullJob.keywords, null, 2)}
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>Notes</h4>
+                    <div class="notes-box">${fullJob.notes || 'No notes added.'}</div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>History</h4>
+                    <div class="timeline">
+                        ${(fullJob.history || []).map(h => `
+                            <div class="timeline-item">
+                                <div class="timeline-dot"></div>
+                                <div class="timeline-content">
+                                    <div class="timeline-date">${formatDate(h.date)}</div>
+                                    <div class="timeline-text">${h.notes || h.text}</div>
+                                </div>
+                            </div>
+                        `).join('') || '<p style="color: var(--gray-500);">No history yet.</p>'}
+                    </div>
+                </div>
+            `;
+
+            const isArchived = ['rejected', 'withdrawn', 'closed'].includes(fullJob.stage);
+            document.getElementById('btn-archive-toggle').textContent = isArchived ? 'Unarchive' : 'Archive';
+            detailModal.classList.add('active');
+        }
+
+        // Event Listeners
+        document.getElementById('btn-add-job').addEventListener('click', () => {
+            currentJobId = null;
+            document.getElementById('modal-title').textContent = 'Add Job to Tracker';
+            document.getElementById('job-form').reset();
+            jobModal.classList.add('active');
+        });
+
+        document.getElementById('btn-close-modal').addEventListener('click', () => {
+            jobModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-cancel-job').addEventListener('click', () => {
+            jobModal.classList.remove('active');
+        });
+
+        let isSubmittingJob = false;
+
+        // Handle form submission
+        document.getElementById('job-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (isSubmittingJob) return;
+
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            isSubmittingJob = true;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Saving...';
+
+            const url = document.getElementById('job-url').value.trim();
+            const text = document.getElementById('job-text').value.trim();
+
+            if (!text) {
+                alert('Please paste the job description text');
+                isSubmittingJob = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Save Job';
+                return;
+            }
+
+            const requestData = {
+                url: url || null,
+                job_text: text
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to save job');
+                }
+
+                const savedJob = await response.json();
+                console.log('Job saved:', savedJob);
+
+                jobModal.classList.remove('active');
+                document.getElementById('job-form').reset();
+                await fetchJobs();
+                await fetchStats();
+
+            } catch (error) {
+                console.error('Error saving job:', error);
+                let errorMsg = error.message;
+
+                if (errorMsg.includes('Ollama') || errorMsg.includes('parse')) {
+                    errorMsg = 'Failed to analyze job description. Please ensure Ollama is running and the job text is valid.';
+                }
+
+                alert('Error saving job:\n' + errorMsg);
+            } finally {
+                isSubmittingJob = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Save Job';
+            }
+        });
+
+        // Edit modal handlers
+        document.getElementById('btn-close-edit').addEventListener('click', () => {
+            editModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-cancel-edit').addEventListener('click', () => {
+            editModal.classList.remove('active');
+        });
+
+        document.getElementById('edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const jobId = document.getElementById('edit-job-id').value;
+            const updateData = {
+                company: document.getElementById('edit-company').value,
+                position: document.getElementById('edit-position').value,
+                location: document.getElementById('edit-location').value || null,
+                salary: document.getElementById('edit-salary').value || null,
+                remote: document.getElementById('edit-remote').value || null,
+                job_url: document.getElementById('edit-job-url').value || null,
+                job_description_raw: document.getElementById('edit-job-description-raw').value || null,
+                job_description_parsed: document.getElementById('edit-job-description-parsed').value || null,
+                notes: document.getElementById('edit-notes').value || null,
+                applied_date: document.getElementById('edit-applied-date').value || null
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updateData)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to update job');
+                }
+
+                editModal.classList.remove('active');
+                await fetchJobs();
+                await fetchStats();
+                // Refresh detail view if still open
+                if (currentJobId === parseInt(jobId)) {
+                    showDetail(currentJobId);
+                }
+
+            } catch (error) {
+                console.error('Error updating job:', error);
+                alert('Error updating job: ' + error.message);
+            }
+        });
+
+        document.getElementById('btn-close-detail').addEventListener('click', () => {
+            detailModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-edit').addEventListener('click', async () => {
+            if (!currentJobId) return;
+            // Open edit mode - fetch job details and populate form
+            try {
+                const response = await fetch(`${API_URL}/jobs/${currentJobId}`);
+                if (!response.ok) throw new Error('Failed to fetch job details');
+                const job = await response.json();
+
+                // Populate edit form fields
+                document.getElementById('edit-job-id').value = job.id;
+                document.getElementById('edit-company').value = job.company || '';
+                document.getElementById('edit-position').value = job.position || '';
+                document.getElementById('edit-location').value = job.location || '';
+                document.getElementById('edit-salary').value = job.salary || '';
+                document.getElementById('edit-remote').value = job.remote || '';
+                document.getElementById('edit-applied-date').value = job.applied_date ? job.applied_date.split('T')[0] : '';
+                document.getElementById('edit-job-url').value = job.job_url || '';
+                document.getElementById('edit-job-description-raw').value = job.job_description_raw || '';
+                document.getElementById('edit-job-description-parsed').value = job.job_description_parsed || '';
+                document.getElementById('edit-notes').value = job.notes || '';
+
+                detailModal.classList.remove('active');
+                editModal.classList.add('active');
+            } catch (error) {
+                console.error('Error fetching job details:', error);
+            }
+        });
+
+        document.getElementById('btn-delete').addEventListener('click', async () => {
+            if (!currentJobId) return;
+            if (confirm('Are you sure you want to delete this job?')) {
+                try {
+                    const response = await fetch(`${API_URL}/jobs/${currentJobId}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error('Failed to delete job');
+                    detailModal.classList.remove('active');
+                    await fetchJobs();
+                    await fetchStats();
+                } catch (error) {
+                    console.error('Error deleting job:', error);
+                    alert('Error deleting job: ' + error.message);
+                }
+            }
+        });
+
+        document.getElementById('btn-archive-toggle').addEventListener('click', async () => {
+            if (!currentJobId) return;
+            const job = jobs.find(j => j.id === currentJobId);
+            if (!job) return;
+
+            const newStage = ['rejected', 'withdrawn', 'closed'].includes(job.stage) ? 'saved' : 'closed';
+            try {
+                await quickStatus(currentJobId, newStage);
+                detailModal.classList.remove('active');
+            } catch (error) {
+                console.error('Error toggling archive:', error);
+            }
+        });
+
+        // Tab filtering
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.dataset.filter;
+                renderJobs();
+            });
+        });
+
+        // Close modals on overlay click
+        jobModal.addEventListener('click', (e) => {
+            if (e.target === jobModal) jobModal.classList.remove('active');
+        });
+
+        detailModal.addEventListener('click', (e) => {
+            if (e.target === detailModal) detailModal.classList.remove('active');
+        });
+
+        // Initial data fetch from database
+        fetchJobs();
+        fetchStats();
+
+        // ============================================
+        // RESUME GENERATION FUNCTIONALITY
+        // ============================================
+
+        const resumeSettingsModal = document.getElementById('resume-settings-modal');
+        const resumeEditorModal = document.getElementById('resume-editor-modal');
+
+        // Resume Settings Event Listeners
+        document.getElementById('btn-resume-settings').addEventListener('click', () => {
+            loadResumeSettings();
+            resumeSettingsModal.classList.add('active');
+        });
+
+        document.getElementById('btn-close-resume-settings').addEventListener('click', () => {
+            resumeSettingsModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-cancel-resume-settings').addEventListener('click', () => {
+            resumeSettingsModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-save-resume-settings').addEventListener('click', saveResumeSettings);
+
+        // Resume Editor Event Listeners
+        document.getElementById('btn-close-resume-editor').addEventListener('click', () => {
+            resumeEditorModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-cancel-resume-editor').addEventListener('click', () => {
+            resumeEditorModal.classList.remove('active');
+        });
+
+        document.getElementById('btn-regenerate-resume').addEventListener('click', async () => {
+            if (currentEditingJobId) {
+                await generateResume(currentEditingJobId);
+            }
+        });
+
+        document.getElementById('btn-export-resume').addEventListener('click', exportResumeToDocx);
+
+        // File upload zones
+        const exampleResumesZone = document.getElementById('example-resumes-zone');
+        const exampleResumesInput = document.getElementById('example-resumes-input');
+        const templateZone = document.getElementById('template-zone');
+        const templateInput = document.getElementById('template-input');
+
+        exampleResumesZone.addEventListener('click', () => exampleResumesInput.click());
+        exampleResumesZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            exampleResumesZone.style.borderColor = 'var(--primary)';
+            exampleResumesZone.style.background = 'var(--gray-50)';
+        });
+        exampleResumesZone.addEventListener('dragleave', () => {
+            exampleResumesZone.style.borderColor = 'var(--gray-300)';
+            exampleResumesZone.style.background = 'transparent';
+        });
+        exampleResumesZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            exampleResumesZone.style.borderColor = 'var(--gray-300)';
+            exampleResumesZone.style.background = 'transparent';
+            handleExampleFiles(e.dataTransfer.files);
+        });
+        exampleResumesInput.addEventListener('change', (e) => handleExampleFiles(e.target.files));
+
+        templateZone.addEventListener('click', () => templateInput.click());
+        templateZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            templateZone.style.borderColor = 'var(--info)';
+            templateZone.style.background = 'var(--gray-50)';
+        });
+        templateZone.addEventListener('dragleave', () => {
+            templateZone.style.borderColor = 'var(--gray-300)';
+            templateZone.style.background = 'transparent';
+        });
+        templateZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            templateZone.style.borderColor = 'var(--gray-300)';
+            templateZone.style.background = 'transparent';
+            handleTemplateFile(e.dataTransfer.files[0]);
+        });
+        templateInput.addEventListener('change', (e) => handleTemplateFile(e.target.files[0]));
+
+        // Load resume settings from localStorage
+        function loadResumeSettings() {
+            const settings = JSON.parse(localStorage.getItem('resumeSettings')) || {
+                exampleResumes: [],
+                templateFile: null
+            };
+
+            renderExampleResumesList(settings.exampleResumes || []);
+            renderTemplateList(settings.templateFile);
+        }
+
+        // Save resume settings to database
+        async function saveResumeSettings() {
+            try {
+                // Save example resumes to database
+                if (resumeSettings.exampleResumes && resumeSettings.exampleResumes.length > 0) {
+                    for (const resume of resumeSettings.exampleResumes) {
+                        if (resume.content && resume.content.startsWith('data:')) {
+                            // Upload new file to database
+                            const response = await fetch(`${API_URL}/resumes/base`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    name: resume.name,
+                                    resume_type: 'example',
+                                    content: resume.content
+                                })
+                            });
+                            if (!response.ok) {
+                                const errorText = await response.text();
+                                throw new Error(`Failed to save example resume: ${response.status} ${errorText}`);
+                            }
+                        }
+                    }
+                }
+
+                // Save template to database
+                if (resumeSettings.templateFile && resumeSettings.templateFile.content && resumeSettings.templateFile.content.startsWith('data:')) {
+                    // Delete existing template and upload new one
+                    const response = await fetch(`${API_URL}/resumes/base`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: resumeSettings.templateFile.name,
+                            resume_type: 'template',
+                            content: resumeSettings.templateFile.content
+                        })
+                    });
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Failed to save template: ${response.status} ${errorText}`);
+                    }
+                }
+
+                // Save to localStorage for quick access
+                const settings = {
+                    exampleResumes: resumeSettings.exampleResumes || [],
+                    templateFile: resumeSettings.templateFile || null
+                };
+                localStorage.setItem('resumeSettings', JSON.stringify(settings));
+                resumeSettings = settings;
+                resumeSettingsModal.classList.remove('active');
+                alert('Resume settings saved successfully!');
+            } catch (error) {
+                console.error('Error saving resume settings:', error);
+                alert('Error saving settings. Please try again.');
+            }
+        }
+
+        // Handle example resume files
+        function handleExampleFiles(files) {
+            if (!files.length) return;
+
+            const validFiles = Array.from(files).filter(file => {
+                const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+                const validExtensions = ['.pdf', '.docx', '.txt'];
+                const isValidType = validTypes.includes(file.type) || validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+                const isValidSize = file.size <= 5 * 1024 * 1024; // 5MB
+                return isValidType && isValidSize;
+            });
+
+            if (!resumeSettings.exampleResumes) resumeSettings.exampleResumes = [];
+
+            validFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    resumeSettings.exampleResumes.push({
+                        name: file.name,
+                        type: file.type,
+                        content: e.target.result,
+                        uploadedAt: new Date().toISOString()
+                    });
+                    renderExampleResumesList(resumeSettings.exampleResumes);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Handle template file
+        function handleTemplateFile(file) {
+            if (!file) return;
+
+            const isValidType = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                               file.name.toLowerCase().endsWith('.docx');
+            const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB
+
+            if (!isValidType) {
+                alert('Please upload a DOCX file only.');
+                return;
+            }
+            if (!isValidSize) {
+                alert('File size must be less than 10MB.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                resumeSettings.templateFile = {
+                    name: file.name,
+                    content: e.target.result,
+                    uploadedAt: new Date().toISOString()
+                };
+                renderTemplateList(resumeSettings.templateFile);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Render example resumes list
+        function renderExampleResumesList(files) {
+            const container = document.getElementById('example-resumes-list');
+            if (!files || files.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = files.map((file, index) => `
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--gray-100); border-radius: 6px; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-file" style="color: var(--primary);"></i>
+                        <span style="font-size: 0.9rem;">${file.name}</span>
+                    </div>
+                    <button onclick="removeExampleResume(${index})" style="background: none; border: none; color: var(--danger); cursor: pointer;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        // Render template list
+        function renderTemplateList(file) {
+            const container = document.getElementById('template-list');
+            if (!file) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--info); color: white; border-radius: 6px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-file-word"></i>
+                        <span style="font-size: 0.9rem;">${file.name}</span>
+                    </div>
+                    <button onclick="removeTemplateFile()" style="background: none; border: none; color: white; cursor: pointer;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+        }
+
+        // Remove example resume
+        window.removeExampleResume = function(index) {
+            resumeSettings.exampleResumes.splice(index, 1);
+            renderExampleResumesList(resumeSettings.exampleResumes);
+        };
+
+        // Remove template file
+        window.removeTemplateFile = function() {
+            resumeSettings.templateFile = null;
+            renderTemplateList(null);
+        };
+
+        // Generate resume for a job
+        window.generateResume = async function(jobId) {
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            const settings = JSON.parse(localStorage.getItem('resumeSettings')) || {};
+
+            const hasExampleResumes = settings.exampleResumes && settings.exampleResumes.length > 0;
+            const hasTemplate = settings.templateFile;
+
+            if (!hasExampleResumes && !hasTemplate) {
+                alert('Please upload example resumes or a template in Resume Settings first.');
+                resumeSettingsModal.classList.add('active');
+                return;
+            }
+
+            try {
+                // Show loading state
+                const btn = document.querySelector(`button[onclick="generateResume(${jobId})"]`);
+                if (btn) {
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+                    btn.disabled = true;
+                }
+
+                // Call the resume generation API
+                const response = await fetch(`${API_URL}/jobs/${jobId}/generate-resume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        example_resumes: settings.exampleResumes || [],
+                        template: settings.templateFile
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to generate resume');
+                }
+
+                const result = await response.json();
+
+                // Save the generated resume to the job
+                job.generated_resume = {
+                    content: result.resume,
+                    generatedAt: new Date().toISOString()
+                };
+
+                // Refresh the display
+                await fetchJobs();
+
+                // Open the editor with the generated resume
+                openResumeEditor(jobId);
+
+            } catch (error) {
+                console.error('Error generating resume:', error);
+                alert('Error generating resume. Please try again.');
+
+                // Reset button state
+                if (btn) {
+                    btn.innerHTML = '<i class="fas fa-magic"></i> Generate Resume';
+                    btn.disabled = false;
+                }
+            }
+        };
+
+        // Open resume editor
+        window.openResumeEditor = function(jobId) {
+            console.log('openResumeEditor called with jobId:', jobId);
+            const job = jobs.find(j => j.id === jobId);
+            console.log('Found job:', job);
+            console.log('job.generated_resume:', job.generated_resume);
+            
+            if (!job || !job.generated_resume) {
+                console.log('No job or no generated_resume');
+                alert('No generated resume found for this job. Please generate one first.');
+                return;
+            }
+
+            currentEditingJobId = jobId;
+
+            // Close resume settings modal if open
+            const resumeSettingsModal = document.getElementById('resume-settings-modal');
+            if (resumeSettingsModal && resumeSettingsModal.classList.contains('active')) {
+                console.log('Closing resume settings modal');
+                resumeSettingsModal.classList.remove('active');
+            }
+
+            // Check modal element exists
+            console.log('resumeEditorModal element:', resumeEditorModal);
+            console.log('resumeEditorModal before:', resumeEditorModal.classList.contains('active'));
+
+            document.getElementById('resume-editor-job-title').textContent = job.position;
+            document.getElementById('resume-editor-company').textContent = job.company;
+            // Handle both object and string formats for generated_resume
+            const resumeContent = typeof job.generated_resume === 'object' ? job.generated_resume.content : job.generated_resume;
+            document.getElementById('resume-editor-content').value = resumeContent || '';
+
+            resumeEditorModal.classList.add('active');
+            console.log('resumeEditorModal after:', resumeEditorModal.classList.contains('active'));
+        };
+
+        // Export resume to DOCX
+        function exportResumeToDocx() {
+            const content = document.getElementById('resume-editor-content').value;
+            const job = jobs.find(j => j.id === currentEditingJobId);
+
+            if (!content || !job) return;
+
+            try {
+                const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = docx;
+
+                // Parse the resume content and create paragraphs
+                const lines = content.split('\n');
+                const paragraphs = [];
+
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (!trimmed) {
+                        paragraphs.push(new Paragraph({ spacing: { after: 100 } }));
+                        return;
+                    }
+
+                    // Check if it's a heading (all caps, or ends with colon, or is short)
+                    const isHeading = /^[A-Z][A-Z\s]+$/.test(trimmed) ||
+                                     trimmed.endsWith(':') ||
+                                     (trimmed.length < 50 && !trimmed.includes('.') && /^[A-Z]/.test(trimmed));
+
+                    if (isHeading) {
+                        paragraphs.push(new Paragraph({
+                            text: trimmed,
+                            heading: HeadingLevel.HEADING_2,
+                            spacing: { before: 200, after: 100 }
+                        }));
+                    } else {
+                        paragraphs.push(new Paragraph({
+                            children: [new TextRun({ text: trimmed, size: 22 })],
+                            spacing: { after: 100 }
+                        }));
+                    }
+                });
+
+                const doc = new Document({
+                    sections: [{
+                        properties: {
+                            page: {
+                                margin: {
+                                    top: 1440, // 1 inch
+                                    right: 1440,
+                                    bottom: 1440,
+                                    left: 1440
+                                }
+                            }
+                        },
+                        children: paragraphs
+                    }]
+                });
+
+                Packer.toBlob(doc).then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `\${fullJob\.company.replace(/\s+/g, '_')}_Resume.docx`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                });
+
+            } catch (error) {
+                console.error('Error exporting to DOCX:', error);
+                alert('Error exporting resume. Please try again.');
+            }
+        }
+
+        // Close modals on overlay click
+        resumeSettingsModal.addEventListener('click', (e) => {
+            if (e.target === resumeSettingsModal) resumeSettingsModal.classList.remove('active');
+        });
+
+        resumeEditorModal.addEventListener('click', (e) => {
+            if (e.target === resumeEditorModal) resumeEditorModal.classList.remove('active');
+        });
+    </script>
+</body>
+</html>
