@@ -3,3 +3,4 @@
 .db
 backend/backend.log
 .claude/
+.log
