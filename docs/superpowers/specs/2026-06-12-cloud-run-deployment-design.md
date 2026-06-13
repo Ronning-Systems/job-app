@@ -200,6 +200,9 @@ setup.sh
 ### `cloudbuild.yaml`
 
 ```yaml
+substitutions:
+  _REGION: us-central1
+
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/jobsync', '.']
@@ -213,11 +216,11 @@ steps:
       - 'deploy'
       - 'jobsync'
       - '--image=gcr.io/$PROJECT_ID/jobsync'
-      - '--region=us-central1'
+      - '--region=${_REGION}'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--add-cloudsql-instances'
-      - '${PROJECT_ID}:${REGION}:jobsync-db'
+      - '${PROJECT_ID}:${_REGION}:jobsync-db'
       - '--set-env-vars'
       - 'MODEL_ENDPOINT=https://api.olama.ai,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
       - '--set-secrets'
