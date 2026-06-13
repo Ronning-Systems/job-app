@@ -143,8 +143,9 @@ Same change in `job_parser.py` for parsing calls.
 Add:
 ```
 psycopg2-binary
-cloud-sql-python-connector[pg8000]
 ```
+
+Note: `cloud-sql-python-connector[pg8000]` was originally planned but removed — Cloud Run connects to Cloud SQL via Unix socket (`host=/cloudsql/...` in the connection string) which psycopg2 handles directly. The connector is only needed for IAM auth, which can be added later if required.
 
 ### `mcp_server.py`
 
@@ -170,6 +171,7 @@ COPY backend/ ./backend/
 COPY agents/ ./agents/
 COPY index.html ./static/
 
+ENV PYTHONPATH=/app/backend
 EXPOSE 8080
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
