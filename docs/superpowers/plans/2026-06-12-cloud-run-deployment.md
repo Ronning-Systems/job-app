@@ -89,7 +89,7 @@ git commit -m "feat: add configurable DATABASE_URL with PostgreSQL support and S
 
 ### Task 2: Add API key authentication to Ollama calls
 
-Both `agents.py` and `job_parser.py` make HTTP calls to the Ollama API endpoint. For Ollama Cloud, we need to send a `Bearer` token in the `Authorization` header. Add `MODEL_API_KEY` env var support.
+Both `agents.py` and `job_parser.py` make HTTP calls to the Ollama API endpoint. For Ollama Cloud, we need to send a `Bearer` token in the `Authorization` header. Add `OLLAMA_API_KEY` env var support.
 
 **Files:**
 - Modify: `backend/agents.py:92-122` (OllamaAgent class)
@@ -108,7 +108,7 @@ class OllamaAgent:
             "/"
         )
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
-        self.api_key = os.getenv("MODEL_API_KEY", "")
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.timeout = 120.0
 ```
 
@@ -153,7 +153,7 @@ class OllamaClient:
     def __init__(self):
         self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip('/')
         self.model = os.getenv("MODEL_PARSING") or os.getenv("OLLAMA_MODEL") or "llama3.2:latest"
-        self.api_key = os.getenv("MODEL_API_KEY", "")
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
         print(f"[OllamaClient] Using model: {self.model} at {self.base_url}")
 ```
 
@@ -221,7 +221,7 @@ Expected: `Imports OK` (no errors)
 
 ```bash
 git add backend/agents.py backend/job_parser.py
-git commit -m "feat: add MODEL_API_KEY auth header for Ollama Cloud support"
+git commit -m "feat: add OLLAMA_API_KEY auth header for Ollama Cloud support"
 ```
 
 ---
@@ -502,9 +502,9 @@ steps:
       - '--add-cloudsql-instances'
       - '${PROJECT_ID}:${_REGION}:jobsync-db'
       - '--set-env-vars'
-      - 'MODEL_ENDPOINT=https://api.olama.ai,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
+      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
       - '--set-secrets'
-      - 'DATABASE_URL=jobsync-database-url:latest,MODEL_API_KEY=jobsync-model-api-key:latest'
+      - 'DATABASE_URL=jobsync-database-url:latest,OLLAMA_API_KEY=ollama-api-key:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/jobsync'
@@ -564,7 +564,7 @@ echo -n "postgresql+psycopg2://jobsync:${DB_PASSWORD}@/jobsync?host=/cloudsql/${
 read -s -p "Enter Ollama Cloud API key: " OLLAMA_API_KEY
 echo ""
 echo -n "$OLLAMA_API_KEY" | \
-  gcloud secrets create jobsync-model-api-key --data-file=- || echo "Secret may already exist, continuing..."
+  gcloud secrets create ollama-api-key --data-file=- || echo "Secret may already exist, continuing..."
 
 # Get project number for IAM
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
@@ -575,7 +575,7 @@ gcloud secrets add-iam-policy-binding jobsync-database-url \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
-gcloud secrets add-iam-policy-binding jobsync-model-api-key \
+gcloud secrets add-iam-policy-binding ollama-api-key \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 

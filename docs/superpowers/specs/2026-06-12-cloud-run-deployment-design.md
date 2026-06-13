@@ -71,7 +71,7 @@ Port: `8080` (Cloud Run convention)
 
 Two secrets:
 1. `jobsync-database-url` — full PostgreSQL connection string
-2. `jobsync-model-api-key` — Ollama Cloud API key
+2. `ollama-api-key` — Ollama Cloud API key
 
 Cloud Run accesses these via IAM — no credentials in container image or `.env`.
 
@@ -126,7 +126,7 @@ class OllamaAgent:
     def __init__(self):
         self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip("/")
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
-        self.api_key = os.getenv("MODEL_API_KEY", "")
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.timeout = 120.0
 
     async def generate(self, prompt, system=None, temperature=0.3):
@@ -222,9 +222,9 @@ steps:
       - '--add-cloudsql-instances'
       - '${PROJECT_ID}:${_REGION}:jobsync-db'
       - '--set-env-vars'
-      - 'MODEL_ENDPOINT=https://api.olama.ai,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
+      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
       - '--set-secrets'
-      - 'DATABASE_URL=jobsync-database-url:latest,MODEL_API_KEY=jobsync-model-api-key:latest'
+      - 'DATABASE_URL=jobsync-database-url:latest,OLLAMA_API_KEY=ollama-api-key:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/jobsync'
@@ -250,7 +250,7 @@ images:
    echo -n "postgresql+psycopg2://jobsync:PASSWORD@/jobsync?host=/cloudsql/PROJECT:us-central1:jobsync-db" | \
      gcloud secrets create jobsync-database-url --data-file=-
    echo -n "<OLLAMA_API_KEY>" | \
-     gcloud secrets create jobsync-model-api-key --data-file=-
+     gcloud secrets create ollama-api-key --data-file=-
    ```
 5. **Grant Cloud Run access to secrets**:
    ```bash
@@ -268,17 +268,17 @@ images:
 | Variable | Source | Example |
 |----------|--------|---------|
 | `DATABASE_URL` | Secret Manager | `postgresql+psycopg2://jobsync:PASS@/jobsync?host=/cloudsql/PROJECT:REGION:jobsync-db` |
-| `MODEL_ENDPOINT` | Direct env var | `https://api.olama.ai` |
+| `MODEL_ENDPOINT` | Direct env var | `https://ollama.com` |
 | `MODEL_PARSING` | Direct env var | `minimax-m2.5:cloud` |
 | `MODEL_AGENTS` | Direct env var | `glm-5:cloud` |
 | `MODEL_COMMANDS` | Direct env var | `kimi-k2.5:cloud` |
-| `MODEL_API_KEY` | Secret Manager | (Ollama Cloud API key) |
+| `OLLAMA_API_KEY` | Secret Manager | (Ollama Cloud API key) |
 
 ## Local Development
 
 Local development continues to work as-is:
 - No `DATABASE_URL` → falls back to SQLite
-- No `MODEL_API_KEY` → assumes local Ollama (no auth needed)
+- No `OLLAMA_API_KEY` → assumes local Ollama (no auth needed)
 - `mcp_server.py` and `start_*.sh` remain for local use
 - `.env` file stays in `.gitignore`
 
@@ -288,8 +288,8 @@ Local development continues to work as-is:
 |------|--------|
 | `backend/models.py` | Configurable `DATABASE_URL`, PostgreSQL + Cloud SQL support, connection pooling |
 | `backend/main.py` | Merge MCP `/fetch-job` route, add static file serving, SPA catch-all |
-| `backend/agents.py` | Add `MODEL_API_KEY` auth header to Ollama calls |
-| `backend/job_parser.py` | Add `MODEL_API_KEY` auth header to Ollama calls |
+| `backend/agents.py` | Add `OLLAMA_API_KEY` auth header to Ollama calls |
+| `backend/job_parser.py` | Add `OLLAMA_API_KEY` auth header to Ollama calls |
 | `backend/requirements.txt` | Add `psycopg2-binary`, `cloud-sql-python-connector[pg8000]` |
 | `index.html` | Move to `static/index.html` (or serve from project root) |
 | New: `Dockerfile` | Python 3.11 slim, deps install, uvicorn on 8080 |
