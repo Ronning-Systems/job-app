@@ -97,6 +97,7 @@ class OllamaAgent:
             "/"
         )
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.timeout = 120.0
 
     async def generate(
@@ -104,6 +105,10 @@ class OllamaAgent:
     ) -> str:
         """Generate text using Ollama"""
         url = f"{self.base_url}/api/generate"
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         payload = {
             "model": self.model,
@@ -116,7 +121,7 @@ class OllamaAgent:
             payload["system"] = system
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
             return data.get("response", "")
