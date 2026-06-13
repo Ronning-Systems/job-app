@@ -23,6 +23,8 @@ if env_path.exists():
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel, HttpUrl
@@ -128,47 +130,6 @@ class JobDetailResponse(JobResponse):
     generated_resume: Optional[str]
 
 
-# MCP Server configuration
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
-
-
-# Default headers to avoid 403 errors
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "DNT": "1",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
-}
-
-
-async def fetch_url_directly(url: str) -> str:
-    """Fetch URL directly with proper headers to avoid blocks"""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-        response = await client.get(url, headers=DEFAULT_HEADERS)
-        response.raise_for_status()
-        return response.text
-
-
-async def fetch_job_from_mcp(url: str) -> dict:
-    """Call MCP server to fetch job details from URL"""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{MCP_SERVER_URL}/fetch-job", json={"url": url}, timeout=30.0
-            )
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        # Re-raise so caller can handle fallback
-        raise e
 
 
 @app.post("/api/jobs", response_model=JobDetailResponse)
@@ -655,6 +616,88 @@ async def generate_resume(
     )
 
     return {"job_id": job_id, "resume": resume}
+
+
+# Merged MCP routes (previously mcp_server.py)
+
+
+@app.post("/api/fetch-job")
+async def fetch_job(request: dict):
+    """
+    Fetch job details from a URL.
+    Supports LinkedIn, Indeed, and generic job boards.
+    """
+    url = request.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+    }
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            html_content = response.text
+
+        parser = JobParser()
+        job_data = await parser.parse_from_html(html_content, url)
+        return job_data
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied (403) when fetching URL. The website may block automated requests: {url}",
+            )
+        elif e.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job posting not found (404): {url}",
+            )
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch URL (HTTP {e.response.status_code}): {str(e)}",
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Network error when fetching URL: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing job: {str(e)}")
+
+
+# Static file serving and SPA catch-all
+STATIC_DIR = str(Path(__file__).parent.parent / "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+async def serve_index():
+    """Serve the main frontend page"""
+    return FileResponse(Path(STATIC_DIR) / "index.html")
+
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """Catch-all for SPA routing — return index.html for any non-API path"""
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(Path(STATIC_DIR) / "index.html")
 
 
 if __name__ == "__main__":
