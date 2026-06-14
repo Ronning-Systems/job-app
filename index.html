@@ -1643,6 +1643,7 @@ The AI will automatically extract:
         // Initial data fetch from database
         fetchJobs();
         fetchStats();
+        loadResumeSettingsFromDB();
 
         // ============================================
         // RESUME GENERATION FUNCTIONALITY
@@ -1725,6 +1726,36 @@ The AI will automatically extract:
             handleTemplateFile(e.dataTransfer.files[0]);
         });
         templateInput.addEventListener('change', (e) => handleTemplateFile(e.target.files[0]));
+
+        // Load resume settings from database into localStorage
+        async function loadResumeSettingsFromDB() {
+            try {
+                const response = await fetch(`${API_URL}/resumes/base`);
+                if (!response.ok) return;
+                const dbResumes = await response.json();
+
+                const exampleResumes = dbResumes.filter(r => r.resume_type === 'example');
+                const template = dbResumes.find(r => r.resume_type === 'template');
+
+                const settings = {
+                    exampleResumes: exampleResumes.map(r => ({
+                        id: r.id,
+                        name: r.name,
+                        uploadedAt: r.created_at
+                    })),
+                    templateFile: template ? {
+                        id: template.id,
+                        name: template.name,
+                        uploadedAt: template.created_at
+                    } : null
+                };
+
+                localStorage.setItem('resumeSettings', JSON.stringify(settings));
+                resumeSettings = settings;
+            } catch (error) {
+                console.error('Error loading resume settings from DB:', error);
+            }
+        }
 
         // Load resume settings from localStorage
         function loadResumeSettings() {
@@ -2003,7 +2034,12 @@ The AI will automatically extract:
             const resumeContent = typeof job.generated_resume === 'object' ? job.generated_resume.content : job.generated_resume;
             document.getElementById('resume-editor-content').value = resumeContent || '';
 
-            resumeEditorModal.classList.add('active');
+            const editorModal = document.getElementById('resume-editor-modal');
+            if (editorModal) {
+                editorModal.classList.add('active');
+            } else {
+                console.error('resume-editor-modal element not found');
+            }
         };
 
         // Export resume to DOCX
