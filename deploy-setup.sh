@@ -5,7 +5,7 @@
 set -e
 
 PROJECT_ID=$(gcloud config get-value project)
-REGION=${1:-us-central1}
+REGION=${1:-us-west1}
 
 echo "Setting up JobSync infrastructure in project: $PROJECT_ID, region: $REGION"
 echo "==========================================================================="

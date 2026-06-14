@@ -1,5 +1,6 @@
 substitutions:
-  _REGION: us-central1
+  _REGION: us-west1
+  _DB_INSTANCE: ronning-systems:us-west1:ronning-systems-jobapp
 
 steps:
   # Build the container image
@@ -21,7 +22,7 @@ steps:
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--add-cloudsql-instances'
-      - '${PROJECT_ID}:${_REGION}:jobsync-db'
+      - '${_DB_INSTANCE}'
       - '--set-env-vars'
       - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
       - '--set-secrets'
