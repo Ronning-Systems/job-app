@@ -1,217 +1,212 @@
 # JobSync - Job Application Tracker
 
-A comprehensive job application tracking system with resume management and AI-powered job description parsing.
-
-**Live URL:** https://jobsync.ronning.systems
+A personal job application tracking system with AI-powered job description parsing, resume generation, and ATS analysis. Deployed on Google Cloud Run.
 
 ## Features
 
 ### Job Tracking
 - Track jobs through 9 stages: Saved, Applied, Phone Screen, Interview, Executive Call, Offered, Rejected, Withdrawn, Closed
-- Add jobs via URL (auto-fetches job details via MCP server) or plain text (parsed via Job Archival Agent)
+- Add jobs via URL (auto-fetches and parses job details) or plain text
 - Store job descriptions, requirements, and extracted keywords
 - History tracking with automatic stage change logging
 
 ### Resume Management
-- Create and manage multiple resumes
+- Create and manage multiple resumes (example and template types)
 - ATS optimization via ATS Expert Agent
 - Technical fit analysis via Technical Hiring Manager Agent
-- Resume generation tailored to specific jobs
+- Resume generation tailored to specific jobs using example resumes and templates
 
 ### AI Agents
-- **Job Description Archiver Agent**: Parses job postings from URLs or text
-- **ATS Expert Agent**: Analyzes resumes for ATS compatibility
-- **Technical Hiring Manager Agent**: Evaluates technical fit
-- **Resume Generator Agent**: Creates tailored resumes
+- **Job Description Parser**: Parses job postings from URLs or text via Ollama Cloud
+- **ATS Expert Agent**: Analyzes resumes for ATS compatibility and keyword matching
+- **Technical Hiring Manager Agent**: Evaluates technical fit against job requirements
+- **Resume Generator Agent**: Creates tailored resumes using example resumes and templates
 
 ## Architecture
 
-### Frontend
-- Pure HTML/CSS/JS (no build step required)
-- Responsive design with Font Awesome icons
-- Direct API integration with backend
-
-### Backend
-- **FastAPI** (Python 3.9+) - REST API
-- **SQLAlchemy** - Database ORM
-- **SQLite** - Default database (easily swappable to PostgreSQL)
-
-### Services
-- **Backend API** (Port 8000): Main application API
-- **MCP Server** (Port 8080): Job fetching and parsing service
-
-## Installation
-
-### Prerequisites
-- Python 3.9+
-- pip
-
-### Quick Setup
-
-```bash
-# Clone/navigate to the project
-cd /path/to/job-app
-
-# Run the setup script
-./setup.sh
-
-# This will:
-# - Create Python 3.9 virtual environments
-# - Install all dependencies
-# - Create startup scripts
+```
+┌──────────────────────────────────────────────┐
+│              Google Cloud Run                 │
+│                                              │
+│  ┌──────────────────────────────────┐        │
+│  │     Cloud Run Service           │        │
+│  │     (job-app)                   │        │
+│  │                                 │        │
+│  │  /api/*       → backend routes  │        │
+│  │  /            → index.html      │        │
+│  │  /api/fetch-job → URL fetching │        │
+│  │                                 │        │
+│  │  Env vars:                      │        │
+│  │    DATABASE_URL  → Cloud SQL    │        │
+│  │    MODEL_ENDPOINT → Ollama Cloud│       │
+│  │    OLLAMA_API_KEY (secret)      │        │
+│  └──────────┬──────────┬──────────┘        │
+│             │          │                    │
+│  ┌──────────▼──┐  ┌───▼──────────────┐   │
+│  │ Cloud SQL   │  │ Secret Manager     │   │
+│  │ PostgreSQL  │  │ (DB creds, API key) │   │
+│  └─────────────┘  └────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │
+         │ HTTPS (MODEL_ENDPOINT)
+         │
+┌────────▼────────────────────────────────────┐
+│  Ollama Cloud                                │
+│  (models: minimax-m2.5, glm-5, kimi-k2.5)   │
+└─────────────────────────────────────────────┘
 ```
 
-### Manual Setup
+### Tech Stack
+- **Backend**: Python 3.11, FastAPI, SQLAlchemy
+- **Database**: PostgreSQL (Cloud SQL) in production, SQLite for local dev
+- **Frontend**: Single-page HTML/CSS/JS (no build step)
+- **AI**: Ollama Cloud API (minimax-m2.5, glm-5, kimi-k2.5)
+- **Deployment**: Docker, Google Cloud Run, Cloud Build
 
-```bash
-# Backend
-cd backend
-python3.9 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+### API Endpoints
 
-# MCP Server (in project root)
-cd ..
-python3.9 -m venv mcp_server/venv
-source mcp_server/venv/bin/activate
-pip install -r mcp_server/requirements.txt
-```
-
-## Running the Application
-
-### Option 1: Start All Services
-```bash
-./start_all.sh
-```
-
-### Option 2: Start Services Separately
-
-Terminal 1 - MCP Server:
-```bash
-./start_mcp.sh
-```
-
-Terminal 2 - Backend API:
-```bash
-./start_backend.sh
-```
-
-Terminal 3 - Frontend:
-```bash
-# Serve index.html via any static server
-python -m http.server 3000
-# Or simply open index.html in browser
-```
-
-### Service URLs
-- Frontend: http://localhost:3000 (or file://)
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- MCP Server: http://localhost:8080
-
-## API Endpoints
-
-### Jobs
-- `POST /api/jobs` - Create a new job (URL or text)
-- `GET /api/jobs` - List all jobs
+#### Jobs
+- `POST /api/jobs` - Create a new job (from URL or text)
+- `GET /api/jobs` - List all jobs (with optional stage/search filters)
 - `GET /api/jobs/{id}` - Get job details
 - `PUT /api/jobs/{id}` - Update job
 - `DELETE /api/jobs/{id}` - Delete job
 - `PATCH /api/jobs/{id}/stage` - Update application stage
 
-### Stats
-- `GET /api/stats` - Get dashboard statistics
+#### Resumes
+- `POST /api/resumes/base` - Upload a base resume (example or template)
+- `GET /api/resumes/base` - List base resumes
+- `DELETE /api/resumes/base/{id}` - Delete a base resume
 
-### Agents
+#### Agents
 - `POST /api/agents/ats-analysis` - ATS analysis
 - `POST /api/agents/technical-fit` - Technical fit analysis
-- `POST /api/agents/generate-resume` - Generate resume
+- `POST /api/jobs/{id}/generate-resume` - Generate a tailored resume
+
+#### Other
+- `POST /api/fetch-job` - Fetch and parse a job posting from a URL
+- `GET /api/health` - Health check
+- `GET /api/stats` - Dashboard statistics
+
+## Local Development
+
+### Prerequisites
+- Python 3.9+
+- [Ollama](https://ollama.ai) (for local LLM inference)
+
+### Setup
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Running Locally
+
+```bash
+# Backend (with local SQLite and Ollama)
+cd backend
+source venv/bin/activate
+python main.py
+# Runs on http://localhost:8000
+
+# Frontend is served by the backend at http://localhost:8000
+```
+
+Without `DATABASE_URL` set, the app falls back to SQLite. Without `OLLAMA_API_KEY` set, it assumes local Ollama (no auth required).
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | SQLite fallback |
+| `MODEL_ENDPOINT` | LLM API endpoint | `http://localhost:11434` |
+| `MODEL_PARSING` | Model for job parsing | `llama3.2:latest` |
+| `MODEL_AGENTS` | Model for agent analysis | `llama3.2:latest` |
+| `MODEL_COMMANDS` | Model for commands | `llama3.2:latest` |
+| `OLLAMA_API_KEY` | API key for Ollama Cloud | (none — local dev) |
+
+## Deployment (Cloud Run)
+
+### One-time setup
+
+```bash
+# 1. Enable GCP APIs
+gcloud services enable run.googleapis.com sqladmin.googleapis.com \
+  cloudbuild.googleapis.com secretmanager.googleapis.com \
+  artifactregistry.googleapis.com
+
+# 2. Create Cloud SQL instance
+gcloud sql instances create jobsync-db \
+  --database-version=POSTGRES_15 \
+  --tier=db-f1-micro \
+  --region=us-west1
+
+# 3. Create database and user
+gcloud sql databases create jobsync --instance=jobsync-db
+gcloud sql users create jobsync --instance=jobsync-db --password=<PASSWORD>
+
+# 4. Create secrets
+echo -n "postgresql+psycopg2://jobsync:<PASSWORD>@/jobsync?host=/cloudsql/<CONNECTION_NAME>" | \
+  gcloud secrets create DATABASE_URL --data-file=-
+echo -n "<OLLAMA_API_KEY>" | \
+  gcloud secrets create OLLAMA_API_KEY --data-file=-
+
+# 5. Grant Cloud Run access to secrets
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+gcloud secrets add-iam-policy-binding DATABASE_URL \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+gcloud secrets add-iam-policy-binding OLLAMA_API_KEY \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Deploy
+
+```bash
+# Option 1: Cloud Build (automated)
+gcloud builds submit --config=cloudbuild.yaml
+
+# Option 2: One-shot deploy from source
+gcloud run deploy job-app \
+  --source . \
+  --region us-west1 \
+  --allow-unauthenticated \
+  --add-cloudsql-instances ronning-systems:us-west1:ronning-systems-jobapp \
+  --set-env-vars "MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud" \
+  --set-secrets "DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest"
+```
 
 ## Project Structure
 
 ```
 job-app/
-├── index.html              # Frontend UI
-├── app-requirements.md     # Project requirements
-├── setup.sh                # Setup script
-├── start_all.sh            # Start all services
-├── start_backend.sh        # Start backend only
-├── start_mcp.sh            # Start MCP server only
-├── mcp_server.py           # MCP server (job fetching)
+├── index.html                 # Frontend SPA
+├── Dockerfile                 # Container build config
+├── cloudbuild.yaml            # Cloud Build CI/CD pipeline
+├── deploy-setup.sh            # One-time GCP setup script
+├── .dockerignore              # Docker build exclusions
 │
 ├── backend/
-│   ├── main.py             # FastAPI main application
-│   ├── models.py           # SQLAlchemy models
-│   ├── job_parser.py       # Job description parser
-│   ├── agents.py           # Agent service integrations
-│   └── requirements.txt    # Backend dependencies
+│   ├── main.py                # FastAPI application (API + static serving)
+│   ├── models.py             # SQLAlchemy models (PostgreSQL/SQLite)
+│   ├── job_parser.py           # Job description parser (Ollama-powered)
+│   ├── agents.py              # Agent service (ATS, tech fit, resume gen)
+│   └── requirements.txt       # Python dependencies
 │
-├── mcp_server/
-│   └── requirements.txt    # MCP server dependencies
+├── agents/                    # Agent prompt definitions
+│   ├── ats-expert.md
+│   ├── resume-generator.md
+│   ├── hr-professional.md
+│   └── tech-hiring-manager.md
 │
-└── agents/                 # Agent prompts
-    ├── ats-expert.md
-    ├── resume-generator.md
-    └── tech-hiring-manager.md
-```
-
-## Database Schema
-
-### Job Table
-- company, position, location, salary, remote
-- job_url, job_description_raw, job_description_parsed
-- requirements (JSON), responsibilities (JSON)
-- keywords (JSON), required_credentials (JSON)
-- source_type, source_url
-
-### JobApplication Table
-- job_id (FK)
-- stage (9 possible stages)
-- applied_date, response_received
-- notes, history (JSON)
-
-## Adding a Job
-
-### From URL
-1. Click "Add Job to Tracker"
-2. Select "From URL" tab
-3. Paste the job posting URL
-4. The MCP server fetches and parses the page
-5. Job details are extracted and stored
-
-### From Text
-1. Click "Add Job to Tracker"
-2. Select "From Text" tab
-3. Paste the job description
-4. The Job Archival Agent parses the text
-5. Structured data is extracted and stored
-
-### Manual Entry
-1. Click "Add Job to Tracker"
-2. Select "Manual Entry" tab
-3. Fill in company, position, location, etc.
-4. Optionally add URL and/or description text
-
-## Development
-
-### Adding New Agent Endpoints
-
-Edit `backend/agents.py`:
-
-```python
-def my_new_agent(self, input_data: dict) -> dict:
-    """New agent functionality"""
-    # Implement agent logic
-    return {"result": "..."}
-```
-
-Add endpoint in `backend/main.py`:
-
-```python
-@app.post("/api/agents/my-agent")
-async def my_agent_endpoint(data: MyAgentInput):
-    result = agent_service.my_new_agent(data.dict())
-    return {"analysis": result}
+├── static/                   # Static frontend files (Docker build target)
+│   └── index.html
+│
+└── mcp_server.py              # Standalone MCP server (local dev only)
 ```
 
 ## License
