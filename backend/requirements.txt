@@ -9,3 +9,4 @@ python-dotenv==1.0.0
 pypdf2==3.0.1
 python-docx==0.8.11
 pdfplumber==0.10.3
+psycopg2-binary

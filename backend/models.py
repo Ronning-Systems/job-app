@@ -1,7 +1,12 @@
+import os
+import logging
+
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -86,8 +91,25 @@ class GeneratedResume(Base):
     job = relationship("Job", back_populates="resumes")
 
 
-# Database setup
-engine = create_engine("sqlite:///./job_tracker.db", connect_args={"check_same_thread": False})
+# Database setup - PostgreSQL for production, SQLite for local dev
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if DATABASE_URL:
+    # Production: PostgreSQL (e.g., Cloud SQL via Unix socket)
+    logger.info("Using PostgreSQL database from DATABASE_URL")
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+    )
+else:
+    # Local dev: SQLite fallback
+    logger.warning("DATABASE_URL not set; falling back to SQLite for local development")
+    engine = create_engine(
+        "sqlite:///./job_tracker.db",
+        connect_args={"check_same_thread": False},
+    )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

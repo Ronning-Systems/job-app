@@ -15,6 +15,7 @@ class OllamaClient:
         self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip('/')
         # Use MODEL_PARSING for job parsing, fallback to OLLAMA_MODEL or default
         self.model = os.getenv("MODEL_PARSING") or os.getenv("OLLAMA_MODEL") or "llama3.2:latest"
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
         print(f"[OllamaClient] Using model: {self.model} at {self.base_url}")
 
     async def parse_job_description(self, text: str) -> Dict[str, Any]:
@@ -43,6 +44,10 @@ Job Description:
 
 JSON Output:"""
 
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         response_text = ""
         try:
             print(f"[OllamaClient] Sending request to {self.base_url}/api/generate with model {self.model}")
@@ -57,7 +62,8 @@ JSON Output:"""
                             "temperature": 0.1,
                             "num_predict": 2000
                         }
-                    }
+                    },
+                    headers=headers
                 )
                 response.raise_for_status()
                 result = response.json()
