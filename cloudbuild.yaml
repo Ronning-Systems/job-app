@@ -26,7 +26,7 @@ steps:
       - '--set-env-vars'
       - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
       - '--set-secrets'
-      - 'DATABASE_URL=jobsync-database-url:latest,OLLAMA_API_KEY=ollama-api-key:latest'
+      - 'DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/jobsync'
