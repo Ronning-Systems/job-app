@@ -97,11 +97,12 @@ class OllamaAgent:
             "/"
         )
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
+        self.generation_model = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "llama3.2:latest")
         self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.timeout = 120.0
 
     async def generate(
-        self, prompt: str, system: Optional[str] = None, temperature: float = 0.3
+        self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
     ) -> str:
         """Generate text using Ollama"""
         url = f"{self.base_url}/api/generate"
@@ -111,7 +112,7 @@ class OllamaAgent:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "prompt": prompt,
             "stream": False,
             "options": {"temperature": temperature, "num_predict": 32000},
@@ -386,7 +387,7 @@ Job Description (use ONLY to tailor wording, not to invent experience):
 Output format: Plain text resume only. No JSON needed. Include ALL positions and ALL education."""
 
         try:
-            response = await self.ollama.generate(prompt, temperature=0.7)
+            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
             logger.info(f"[ResumeGenerator] Raw response length: {len(response)}")
 
             if not response:
