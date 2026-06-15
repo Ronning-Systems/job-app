@@ -478,9 +478,40 @@ async def generate_job_resume(
 
     resume_content = resume_result.get("content", json.dumps(resume_result))
 
-    # Save to GeneratedResume table
-    generated_resume = GeneratedResume(job_id=job_id, user_id=current_user.id, content=resume_content)
-    db.add(generated_resume)
+    # Save to GeneratedResume table (create or update with revision tracking)
+    existing_resume = db.query(GeneratedResume).filter(
+        GeneratedResume.job_id == job_id
+    ).first()
+
+    if existing_resume:
+        # Append new revision
+        revisions = existing_resume.revisions or []
+        next_version = len(revisions) + 1
+        revisions.append({
+            "version": next_version,
+            "content": resume_content,
+            "feedback": None,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        existing_resume.current_content = resume_content
+        existing_resume.revisions = revisions
+        existing_resume.updated_at = datetime.utcnow()
+        generated_resume = existing_resume
+    else:
+        # Create new resume with first revision
+        generated_resume = GeneratedResume(
+            job_id=job_id,
+            user_id=current_user.id,
+            current_content=resume_content,
+            revisions=[{
+                "version": 1,
+                "content": resume_content,
+                "feedback": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            }],
+        )
+        db.add(generated_resume)
+
     job.updated_at = datetime.utcnow()
     db.commit()
 
@@ -488,6 +519,86 @@ async def generate_job_resume(
         "job_id": job_id,
         "resume": resume_content,
         "resume_id": generated_resume.id,
+        "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
+        "revisions": generated_resume.revisions,
+    }
+
+
+@app.post("/api/jobs/{job_id}/revise-resume")
+async def revise_job_resume(
+    job_id: int,
+    request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Revise a generated resume based on user feedback. Appends a new revision."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    feedback = request.get("feedback", "")
+    if not feedback:
+        raise HTTPException(status_code=400, detail="Feedback is required")
+
+    # Get existing resume
+    existing_resume = db.query(GeneratedResume).filter(
+        GeneratedResume.job_id == job_id
+    ).first()
+    if not existing_resume or not existing_resume.current_content:
+        raise HTTPException(status_code=404, detail="No generated resume found. Generate one first.")
+
+    # Get example resumes and template
+    example_resumes = request.get("example_resumes", [])
+    template = request.get("template", None)
+
+    if not example_resumes:
+        example_resumes_db = db.query(BaseResume).filter(
+            BaseResume.resume_type == "example",
+            BaseResume.user_id == current_user.id,
+        ).all()
+        example_resumes = [{"name": r.name, "content": r.content} for r in example_resumes_db]
+
+    if not template:
+        template_db = db.query(BaseResume).filter(
+            BaseResume.resume_type == "template",
+            BaseResume.user_id == current_user.id,
+        ).first()
+        template = {"name": template_db.name, "content": template_db.content} if template_db else None
+
+    # Generate revised resume using agent service
+    resume_result = await agent_service.revise_resume(
+        current_resume=existing_resume.current_content,
+        feedback=feedback,
+        job_description=job.job_description_parsed or job.job_description_raw,
+        example_resumes=example_resumes,
+        template=template,
+        target_role=job.position,
+    )
+
+    import json
+    resume_content = resume_result.get("content", json.dumps(resume_result))
+
+    # Append new revision
+    revisions = existing_resume.revisions or []
+    next_version = len(revisions) + 1
+    revisions.append({
+        "version": next_version,
+        "content": resume_content,
+        "feedback": feedback,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    existing_resume.current_content = resume_content
+    existing_resume.revisions = revisions
+    existing_resume.updated_at = datetime.utcnow()
+    job.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "job_id": job_id,
+        "resume": resume_content,
+        "resume_id": existing_resume.id,
+        "version": next_version,
+        "revisions": revisions,
     }
 
 
@@ -574,7 +685,7 @@ def format_job_response(
             .first()
         )
         if latest_resume:
-            generated_resume = latest_resume.content
+            generated_resume = latest_resume.current_content
 
     return {
         "id": job.id,
