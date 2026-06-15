@@ -24,7 +24,9 @@ steps:
       - '--add-cloudsql-instances'
       - '${_DB_INSTANCE}'
       - '--set-env-vars'
-      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud'
+      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=kimi-k2.5:cloud,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://jobsync-XXXXX-uc.a.run.app'
+      - '--set-env-vars'
+      - 'AUTH0_DOMAIN=YOUR_AUTH0_DOMAIN'
       - '--set-secrets'
       - 'DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest'
 
