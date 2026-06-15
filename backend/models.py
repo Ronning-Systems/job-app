@@ -5,10 +5,28 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+import hashlib
 
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    auth0_id = Column(String(255), unique=True, index=True, nullable=False)
+    email = Column(String(255))
+    name = Column(String(255))
+    avatar_url = Column(String(512))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    jobs = relationship("Job", back_populates="user")
+    base_resumes = relationship("BaseResume", back_populates="user")
+
 
 class Job(Base):
     __tablename__ = "jobs"
@@ -32,6 +50,7 @@ class Job(Base):
     # Source tracking
     source_type = Column(String)  # 'url' or 'text'
     source_url = Column(String)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -39,6 +58,7 @@ class Job(Base):
     # Relationships
     applications = relationship("JobApplication", back_populates="job", cascade="all, delete-orphan")
     resumes = relationship("GeneratedResume", back_populates="job", cascade="all, delete-orphan")
+    user = relationship("User", back_populates="jobs")
 
 
 class JobApplication(Base):
@@ -46,6 +66,7 @@ class JobApplication(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Application tracking
     stage = Column(String, default="saved")  # saved, applied, phone_screen, interview, executive_call, offered, rejected, withdrawn, closed
@@ -75,6 +96,8 @@ class BaseResume(Base):
     resume_type = Column(String, nullable=False)  # 'example' or 'template'
     content = Column(Text)  # The actual resume content (text or extracted from DOCX)
     source = Column(String, default="upload")  # 'upload' for now
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user = relationship("User", back_populates="base_resumes")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -84,6 +107,7 @@ class GeneratedResume(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     content = Column(Text)  # The generated resume content
     created_at = Column(DateTime, default=datetime.utcnow)
 
