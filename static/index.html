@@ -636,14 +636,83 @@
             font-size: 0.9rem;
             color: var(--gray-700);
         }
+    /* Auth styles */
+    .auth-container {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-left: auto;
+    }
+    .auth-container .user-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+    }
+    .auth-container .user-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        object-fit: cover;
+    }
+    .auth-container .btn-login,
+    .auth-container .btn-logout {
+        background: rgba(255,255,255,0.15);
+        color: white;
+        border: 1px solid rgba(255,255,255,0.3);
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        transition: background 0.2s;
+    }
+    .auth-container .btn-login:hover,
+    .auth-container .btn-logout:hover {
+        background: rgba(255,255,255,0.25);
+    }
+    .auth-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+    .auth-modal {
+        background: white;
+        border-radius: 16px;
+        padding: 48px;
+        text-align: center;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .auth-modal h2 { color: #111827; margin-bottom: 8px; font-size: 1.5rem; }
+    .auth-modal p { color: #6b7280; margin-bottom: 24px; }
+    .auth-modal .btn-login-modal {
+        background: #4f46e5; color: white; border: none;
+        padding: 12px 32px; border-radius: 8px; cursor: pointer;
+        font-size: 1rem; font-weight: 600; transition: background 0.2s;
+    }
+    .auth-modal .btn-login-modal:hover { background: #4338ca; }
     </style>
+    <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
 <body>
+    <div class="auth-overlay" id="auth-overlay" style="display: none;">
+        <div class="auth-modal">
+            <h2>JobSync</h2>
+            <p>Sign in to track your job applications</p>
+            <button class="btn-login-modal" onclick="login()">Sign In</button>
+        </div>
+    </div>
     <!-- Header -->
     <header>
         <div class="header-content">
             <h1><i class="fas fa-briefcase"></i> JobSync</h1>
             <p>Track your job applications and stay organized</p>
+            <div class="auth-container" id="auth-container"></div>
             <div class="stats">
                 <div class="stat">
                     <span class="stat-value" id="stat-total">12</span>
@@ -1049,6 +1118,128 @@ The AI will automatically extract:
             ? 'https://jobsync.ronning.systems/api'
             : 'http://localhost:8000/api';
 
+        // ─── Auth0 Configuration ───
+        const AUTH0_DOMAIN = window.location.hostname === 'jobsync.ronning.systems'
+            ? 'dev-ronning.us.auth0.com'  // Production Auth0 domain — UPDATE after Auth0 setup
+            : 'dev-ronning.us.auth0.com'; // Same for now; update when Auth0 tenant is created
+
+        const AUTH0_CLIENT_ID = 'REPLACE_AFTER_AUTH0_SETUP';  // Update after Auth0 SPA client creation
+        const AUTH0_AUDIENCE = 'https://jobsync/api';
+        const AUTH0_REDIRECT_URI = window.location.origin;
+
+        let auth0Client = null;
+        let currentUser = null;
+
+        // ─── Auth0 SDK Initialization ───
+        async function initAuth() {
+            try {
+                auth0Client = await window.auth0.createAuth0Client({
+                    domain: AUTH0_DOMAIN,
+                    clientId: AUTH0_CLIENT_ID,
+                    authorizationParams: {
+                        redirect_uri: AUTH0_REDIRECT_URI,
+                        audience: AUTH0_AUDIENCE,
+                    },
+                    cacheLocation: 'memory',
+                    useRefreshTokens: true,
+                });
+
+                // Check if we're returning from Auth0 redirect
+                const query = window.location.search;
+                if (query.includes('code=') && query.includes('state=')) {
+                    await auth0Client.handleRedirectCallback();
+                    window.history.replaceState({}, document.title, '/');
+                }
+
+                // Check if authenticated
+                const isAuthenticated = await auth0Client.isAuthenticated();
+                if (isAuthenticated) {
+                    currentUser = await auth0Client.getUser();
+                    document.getElementById('auth-overlay').style.display = 'none';
+                    updateAuthUI();
+                    initApp();
+                } else {
+                    document.getElementById('auth-overlay').style.display = 'flex';
+                    updateAuthUI();
+                }
+            } catch (err) {
+                console.error('Auth0 initialization error:', err);
+                document.getElementById('auth-overlay').style.display = 'flex';
+                updateAuthUI();
+            }
+        }
+
+        // ─── Auth UI ───
+        function updateAuthUI() {
+            const container = document.getElementById('auth-container');
+            if (!container) return;
+
+            if (currentUser) {
+                const avatarHtml = currentUser.picture
+                    ? `<img src="${currentUser.picture}" alt="${currentUser.name}" class="user-avatar">`
+                    : `<div class="user-avatar" style="background:var(--primary);color:white;display:flex;align-items:center;justify-content:center;font-size:0.8rem;">${(currentUser.name || '?')[0].toUpperCase()}</div>`;
+                container.innerHTML = `
+                    <div class="user-info">
+                        ${avatarHtml}
+                        <span>${currentUser.name || currentUser.email || 'User'}</span>
+                    </div>
+                    <button class="btn-logout" onclick="logout()">Sign Out</button>
+                `;
+            } else {
+                container.innerHTML = `<button class="btn-login" onclick="login()">Sign In</button>`;
+            }
+        }
+
+        // ─── Auth Actions ───
+        async function login() {
+            if (auth0Client) {
+                await auth0Client.loginWithRedirect();
+            }
+        }
+
+        async function logout() {
+            if (auth0Client) {
+                await auth0Client.logout({
+                    logoutParams: {
+                        returnTo: AUTH0_REDIRECT_URI,
+                    },
+                });
+            }
+            currentUser = null;
+            document.getElementById('auth-overlay').style.display = 'flex';
+            updateAuthUI();
+        }
+
+        // ─── Authenticated Fetch Wrapper ───
+        async function apiFetch(url, options = {}) {
+            if (!auth0Client) {
+                throw new Error('Auth0 not initialized');
+            }
+            const token = await auth0Client.getTokenSilently();
+            options.headers = {
+                ...options.headers,
+                'Authorization': `Bearer ${token}`,
+            };
+
+            const response = await fetch(url, options);
+
+            // Handle 401 — try to refresh token
+            if (response.status === 401) {
+                try {
+                    const newToken = await auth0Client.getTokenSilently();
+                    options.headers['Authorization'] = `Bearer ${newToken}`;
+                    return fetch(url, options);
+                } catch (refreshErr) {
+                    // Token refresh failed — redirect to login
+                    console.error('Token refresh failed:', refreshErr);
+                    logout();
+                    throw new Error('Session expired. Please sign in again.');
+                }
+            }
+
+            return response;
+        }
+
         // Status mapping for the 9 stages
         const statusLabels = {
             saved: 'Saved',
@@ -1077,7 +1268,7 @@ The AI will automatically extract:
         // Fetch jobs from API
         async function fetchJobs() {
             try {
-                const response = await fetch(`${API_URL}/jobs`);
+                const response = await apiFetch(`${API_URL}/jobs`);
                 if (!response.ok) throw new Error('Failed to fetch jobs');
                 const data = await response.json();
                 jobs = data;
@@ -1091,7 +1282,7 @@ The AI will automatically extract:
         // Fetch stats from API
         async function fetchStats() {
             try {
-                const response = await fetch(`${API_URL}/stats`);
+                const response = await apiFetch(`${API_URL}/stats`);
                 if (!response.ok) throw new Error('Failed to fetch stats');
                 const stats = await response.json();
 
@@ -1214,7 +1405,7 @@ The AI will automatically extract:
         // Quick status update
         window.quickStatus = async function(id, status) {
             try {
-                const response = await fetch(`${API_URL}/jobs/${id}/stage`, {
+                const response = await apiFetch(`${API_URL}/jobs/${id}/stage`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ stage: status })
@@ -1246,7 +1437,7 @@ The AI will automatically extract:
             // Fetch full job details
             let fullJob;
             try {
-                const response = await fetch(`${API_URL}/jobs/${id}`);
+                const response = await apiFetch(`${API_URL}/jobs/${id}`);
                 if (!response.ok) throw new Error('Failed to fetch job details');
                 fullJob = await response.json();
             } catch (error) {
@@ -1470,7 +1661,7 @@ The AI will automatically extract:
             };
 
             try {
-                const response = await fetch(`${API_URL}/jobs`, {
+                const response = await apiFetch(`${API_URL}/jobs`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestData)
@@ -1532,7 +1723,7 @@ The AI will automatically extract:
             };
 
             try {
-                const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+                const response = await apiFetch(`${API_URL}/jobs/${jobId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(updateData)
@@ -1565,7 +1756,7 @@ The AI will automatically extract:
             if (!currentJobId) return;
             // Open edit mode - fetch job details and populate form
             try {
-                const response = await fetch(`${API_URL}/jobs/${currentJobId}`);
+                const response = await apiFetch(`${API_URL}/jobs/${currentJobId}`);
                 if (!response.ok) throw new Error('Failed to fetch job details');
                 const job = await response.json();
 
@@ -1593,7 +1784,7 @@ The AI will automatically extract:
             if (!currentJobId) return;
             if (confirm('Are you sure you want to delete this job?')) {
                 try {
-                    const response = await fetch(`${API_URL}/jobs/${currentJobId}`, {
+                    const response = await apiFetch(`${API_URL}/jobs/${currentJobId}`, {
                         method: 'DELETE'
                     });
                     if (!response.ok) throw new Error('Failed to delete job');
@@ -1640,14 +1831,16 @@ The AI will automatically extract:
             if (e.target === detailModal) detailModal.classList.remove('active');
         });
 
-        // Initial data fetch from database
-        fetchJobs();
-        fetchStats();
-        loadResumeSettingsFromDB();
+        // ─── Initialize App (called only after successful auth) ───
+        function initApp() {
+            // Initial data fetch from database
+            fetchJobs();
+            fetchStats();
+            loadResumeSettingsFromDB();
 
-        // ============================================
-        // RESUME GENERATION FUNCTIONALITY
-        // ============================================
+            // ============================================
+            // RESUME GENERATION FUNCTIONALITY
+            // ============================================
 
         const resumeSettingsModal = document.getElementById('resume-settings-modal');
         const resumeEditorModal = document.getElementById('resume-editor-modal');
@@ -1730,7 +1923,7 @@ The AI will automatically extract:
         // Load resume settings from database into localStorage
         async function loadResumeSettingsFromDB() {
             try {
-                const response = await fetch(`${API_URL}/resumes/base`);
+                const response = await apiFetch(`${API_URL}/resumes/base`);
                 if (!response.ok) return;
                 const dbResumes = await response.json();
 
@@ -1776,7 +1969,7 @@ The AI will automatically extract:
                     for (const resume of resumeSettings.exampleResumes) {
                         if (resume.content && resume.content.startsWith('data:')) {
                             // Upload new file to database
-                            const response = await fetch(`${API_URL}/resumes/base`, {
+                            const response = await apiFetch(`${API_URL}/resumes/base`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -1796,7 +1989,7 @@ The AI will automatically extract:
                 // Save template to database
                 if (resumeSettings.templateFile && resumeSettings.templateFile.content && resumeSettings.templateFile.content.startsWith('data:')) {
                     // Delete existing template and upload new one
-                    const response = await fetch(`${API_URL}/resumes/base`, {
+                    const response = await apiFetch(`${API_URL}/resumes/base`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1963,7 +2156,7 @@ The AI will automatically extract:
                 }
 
                 // Call the resume generation API
-                const response = await fetch(`${API_URL}/jobs/${jobId}/generate-resume`, {
+                const response = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2122,6 +2315,12 @@ The AI will automatically extract:
 
         resumeEditorModal.addEventListener('click', (e) => {
             if (e.target === resumeEditorModal) resumeEditorModal.classList.remove('active');
+        });
+        } // end initApp()
+
+        // ─── Initialize Auth on Page Load ───
+        document.addEventListener('DOMContentLoaded', () => {
+            initAuth();
         });
     </script>
 </body>
