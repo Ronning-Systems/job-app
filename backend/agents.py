@@ -64,7 +64,7 @@ def _extract_pdf_text(file_bytes: bytes) -> str:
         logger.debug(f"pdfplumber failed: {e}")
 
     try:
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(file_bytes))
         for page in reader.pages:
@@ -73,7 +73,7 @@ def _extract_pdf_text(file_bytes: bytes) -> str:
                 text += page_text + "\n"
         return text.strip()
     except Exception as e:
-        logger.error(f"PyPDF2 failed: {e}")
+        logger.error(f"pypdf failed: {e}")
         return ""
 
 
