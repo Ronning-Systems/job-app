@@ -39,21 +39,25 @@ from models import (
     BaseResume,
     GeneratedResume,
     SessionLocal,
+    User,
 )
 from job_parser import JobParser
 from agents import agent_service
+from auth import get_current_user
+from ssrf import is_url_safe
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Job Tracker API")
 
 # CORS
+CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost:8000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[CORS_ORIGIN],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -61,6 +65,21 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     init_db()
+
+
+# Auth endpoints
+@app.get("/api/auth/me")
+async def get_auth_me(current_user: User = Depends(get_current_user)):
+    """Return current authenticated user's profile"""
+    return {
+        "id": current_user.id,
+        "auth0_id": current_user.auth0_id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "avatar_url": current_user.avatar_url,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
+    }
 
 
 # Pydantic models
@@ -137,6 +156,7 @@ async def create_job(
     input_data: JobCreateInput,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new job from job description text.
@@ -158,6 +178,7 @@ async def create_job(
 
     # Create Job record
     job = Job(
+        user_id=current_user.id,
         company=job_data.get("company", "Unknown"),
         position=job_data.get("position", "Unknown"),
         location=job_data.get("location"),
@@ -181,6 +202,7 @@ async def create_job(
     # Create initial application record with "saved" stage
     application = JobApplication(
         job_id=job.id,
+        user_id=current_user.id,
         stage="saved",
         history=[
             {
@@ -201,11 +223,12 @@ def list_jobs(
     stage: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all jobs with optional filtering"""
+    """List all jobs for the current user with optional filtering"""
     query = db.query(Job, JobApplication).join(
         JobApplication, Job.id == JobApplication.job_id
-    )
+    ).filter(Job.user_id == current_user.id)
 
     if stage:
         query = query.filter(JobApplication.stage == stage)
@@ -224,12 +247,12 @@ def list_jobs(
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobDetailResponse)
-def get_job(job_id: int, db: Session = Depends(get_db)):
+def get_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get detailed job information"""
     result = (
         db.query(Job, JobApplication)
         .join(JobApplication, Job.id == JobApplication.job_id)
-        .filter(Job.id == job_id)
+        .filter(Job.id == job_id, Job.user_id == current_user.id)
         .first()
     )
 
@@ -241,9 +264,9 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/api/jobs/{job_id}", response_model=JobDetailResponse)
-def update_job(job_id: int, update: JobUpdate, db: Session = Depends(get_db)):
+def update_job(job_id: int, update: JobUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Update job details"""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -275,9 +298,9 @@ def update_job(job_id: int, update: JobUpdate, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/jobs/{job_id}")
-def delete_job(job_id: int, db: Session = Depends(get_db)):
+def delete_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete a job and its application records"""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -288,11 +311,11 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/resumes/base")
-def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db)):
+def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Create or update a base resume (example or template)"""
-    # For template type, delete any existing template first
+    # For template type, delete any existing template for this user first
     if resume.resume_type == "template":
-        db.query(BaseResume).filter(BaseResume.resume_type == "template").delete()
+        db.query(BaseResume).filter(BaseResume.resume_type == "template", BaseResume.user_id == current_user.id).delete()
 
     # Create new resume record
     base_resume = BaseResume(
@@ -300,6 +323,7 @@ def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db)):
         resume_type=resume.resume_type,
         content=resume.content,
         source="upload",
+        user_id=current_user.id,
     )
     db.add(base_resume)
     db.commit()
@@ -314,9 +338,9 @@ def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/resumes/base")
-def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(get_db)):
-    """List all base resumes, optionally filtered by type"""
-    query = db.query(BaseResume)
+def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List all base resumes for the current user, optionally filtered by type"""
+    query = db.query(BaseResume).filter(BaseResume.user_id == current_user.id)
     if resume_type:
         query = query.filter(BaseResume.resume_type == resume_type)
 
@@ -333,9 +357,9 @@ def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(g
 
 
 @app.delete("/api/resumes/base/{resume_id}")
-def delete_base_resume(resume_id: int, db: Session = Depends(get_db)):
+def delete_base_resume(resume_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete a base resume"""
-    resume = db.query(BaseResume).filter(BaseResume.id == resume_id).first()
+    resume = db.query(BaseResume).filter(BaseResume.id == resume_id, BaseResume.user_id == current_user.id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
@@ -346,8 +370,13 @@ def delete_base_resume(resume_id: int, db: Session = Depends(get_db)):
 
 
 @app.patch("/api/jobs/{job_id}/stage", response_model=JobDetailResponse)
-def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(get_db)):
+def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Update the application stage and related fields"""
+    # First verify the job belongs to this user
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     application = (
         db.query(JobApplication).filter(JobApplication.job_id == job_id).first()
     )
@@ -386,10 +415,10 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
 
 @app.post("/api/jobs/{job_id}/generate-resume")
 async def generate_job_resume(
-    job_id: int, resume_request: dict, db: Session = Depends(get_db)
+    job_id: int, resume_request: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """Generate a resume for a specific job using example resumes and template"""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -413,7 +442,7 @@ async def generate_job_resume(
     # Fall back to database if not provided in request
     if not example_resumes:
         example_resumes_db = (
-            db.query(BaseResume).filter(BaseResume.resume_type == "example").all()
+            db.query(BaseResume).filter(BaseResume.resume_type == "example", BaseResume.user_id == current_user.id).all()
         )
         example_resumes = [
             {"name": r.name, "content": r.content} for r in example_resumes_db
@@ -424,7 +453,7 @@ async def generate_job_resume(
 
     if not template:
         template_db = (
-            db.query(BaseResume).filter(BaseResume.resume_type == "template").first()
+            db.query(BaseResume).filter(BaseResume.resume_type == "template", BaseResume.user_id == current_user.id).first()
         )
         template = (
             {"name": template_db.name, "content": template_db.content}
@@ -450,7 +479,7 @@ async def generate_job_resume(
     resume_content = resume_result.get("content", json.dumps(resume_result))
 
     # Save to GeneratedResume table
-    generated_resume = GeneratedResume(job_id=job_id, content=resume_content)
+    generated_resume = GeneratedResume(job_id=job_id, user_id=current_user.id, content=resume_content)
     db.add(generated_resume)
     job.updated_at = datetime.utcnow()
     db.commit()
@@ -490,15 +519,17 @@ async def ollama_health_check():
 
 
 @app.get("/api/stats")
-def get_stats(db: Session = Depends(get_db)):
-    """Get dashboard statistics"""
+def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get dashboard statistics for the current user"""
     from sqlalchemy import func
 
-    stats = {"total": db.query(Job).count(), "by_stage": {}}
+    stats = {"total": db.query(Job).filter(Job.user_id == current_user.id).count(), "by_stage": {}}
 
-    # Count by stage
+    # Count by stage (filtered by user)
     stage_counts = (
         db.query(JobApplication.stage, func.count(JobApplication.id))
+        .join(Job, JobApplication.job_id == Job.id)
+        .filter(Job.user_id == current_user.id)
         .group_by(JobApplication.stage)
         .all()
     )
@@ -572,9 +603,9 @@ def format_job_response(
 
 # Agent endpoints
 @app.post("/api/agents/ats-analysis")
-async def ats_analysis(resume_text: str, job_id: int, db: Session = Depends(get_db)):
+async def ats_analysis(resume_text: str, job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Run ATS Expert Agent analysis on a resume against a job"""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -585,9 +616,9 @@ async def ats_analysis(resume_text: str, job_id: int, db: Session = Depends(get_
 
 
 @app.post("/api/agents/technical-fit")
-async def technical_fit(resume_text: str, job_id: int, db: Session = Depends(get_db)):
+async def technical_fit(resume_text: str, job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Run Technical Hiring Manager Agent analysis"""
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -600,12 +631,12 @@ async def technical_fit(resume_text: str, job_id: int, db: Session = Depends(get
 
 @app.post("/api/agents/generate-resume")
 async def generate_resume(
-    user_profile: dict, job_id: Optional[int] = None, db: Session = Depends(get_db)
+    user_profile: dict, job_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """Generate a resume using Resume Generator Agent"""
     job_description = None
     if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
+        job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
         if job:
             job_description = job.job_description_parsed or job.job_description_raw
 
@@ -622,14 +653,20 @@ async def generate_resume(
 
 
 @app.post("/api/fetch-job")
-async def fetch_job(request: dict):
+async def fetch_job(request: dict, current_user: User = Depends(get_current_user)):
     """
     Fetch job details from a URL.
     Supports LinkedIn, Indeed, and generic job boards.
+    Requires authentication to prevent abuse as an open proxy.
     """
     url = request.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
+
+    # SSRF protection: validate URL before fetching
+    is_safe, reason = is_url_safe(url)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"URL is not safe to fetch: {reason}")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
