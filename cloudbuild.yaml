@@ -5,30 +5,28 @@ substitutions:
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/jobsync', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/job-app', '.']
 
   # Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/jobsync']
+    args: ['push', 'gcr.io/$PROJECT_ID/job-app']
 
   # Deploy container image to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - 'run'
       - 'deploy'
-      - 'jobsync'
-      - '--image=gcr.io/$PROJECT_ID/jobsync'
+      - 'job-app'
+      - '--image=gcr.io/$PROJECT_ID/job-app'
       - '--region=${_REGION}'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--add-cloudsql-instances'
       - '${_DB_INSTANCE}'
       - '--set-env-vars'
-      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=kimi-k2.5:cloud,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://job-app-913142543866.us-west1.run.app'
-      - '--set-env-vars'
-      - 'AUTH0_DOMAIN=dev-saxftot48835pavp.us.auth0.com'
+      - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=kimi-k2.5:cloud,AUTH0_DOMAIN=dev-saxftot48835pavp.us.auth0.com,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://job-app-913142543866.us-west1.run.app'
       - '--set-secrets'
-      - 'DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest'
+      - 'jobsync-database-url=DATABASE_URL:latest,ollama-api-key=OLLAMA_API_KEY:latest'
 
 images:
-  - 'gcr.io/$PROJECT_ID/jobsync'
+  - 'gcr.io/$PROJECT_ID/job-app'
