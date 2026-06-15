@@ -400,6 +400,83 @@ Output format: Plain text resume only. No JSON needed. Include ALL positions and
             logger.info(f"[ResumeGenerator] Error: {e}")
             return {"error": str(e), "content": f"Error generating resume: {str(e)}"}
 
+    async def revise_resume(
+        self,
+        current_resume: str,
+        feedback: str,
+        job_description: Optional[str] = None,
+        example_resumes: Optional[List[Dict]] = None,
+        template: Optional[Dict] = None,
+        target_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Revise an existing resume based on user feedback via Ollama.
+        Uses MODEL_GENERATION (kimi-k2.5) for long-form creative output.
+        """
+        agent_prompt = self._load_agent_prompt("resume-generator")
+
+        # Build example resumes section
+        example_resumes_section = ""
+        if example_resumes:
+            example_resumes_section = "\n\nEXAMPLE RESUMES (reference for style and content):\n"
+            for idx, example in enumerate(example_resumes):
+                name = example.get("name", f"Example {idx + 1}")
+                content = example.get("content", "")
+                if content and content.startswith("data:"):
+                    content = extract_text_from_file(content, name)
+                example_resumes_section += f"\n--- Example {idx + 1}: {name} ---\n{content[:40000]}\n"
+
+        template_section = ""
+        if template:
+            template_content = template.get("content", "")
+            if template_content and template_content.startswith("data:"):
+                template_content = extract_text_from_file(
+                    template_content, template.get("name", "template.docx")
+                )
+            template_section = f"\nTEMPLATE (formatting only):\n{template_content[:8000]}\n"
+
+        job_desc_section = f"JOB DESCRIPTION:\n{job_description[:16000]}" if job_description else ""
+
+        prompt = f"""{agent_prompt}
+
+You are REVISING an existing resume based on the user's feedback.
+
+TARGET ROLE: {target_role or "Not specified"}
+
+CURRENT RESUME:
+---
+{current_resume}
+---
+
+USER FEEDBACK (apply these changes):
+---
+{feedback}
+---
+
+{example_resumes_section}
+
+{template_section}
+
+{job_desc_section}
+
+CRITICAL INSTRUCTIONS:
+1. Start from the CURRENT RESUME and make the specific changes requested in the FEEDBACK
+2. Preserve all existing content that the user did NOT ask to change
+3. Do NOT remove any jobs, education, or experience unless the feedback explicitly asks for it
+4. Follow the same strict rules about not fabricating experience (see original instructions)
+5. Output the COMPLETE revised resume (not just the changed sections)
+
+Output format: Plain text resume only. No JSON."""
+
+        try:
+            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            if not response:
+                raise Exception("Empty response from Ollama")
+            return {"content": response.strip()}
+        except Exception as e:
+            logger.info(f"[ResumeRevise] Error: {e}")
+            return {"error": str(e), "content": f"Error revising resume: {str(e)}"}
+
     async def parse_job_description(
         self, text: str, source_url: Optional[str] = None
     ) -> Dict[str, Any]:

@@ -102,14 +102,16 @@ class BaseResume(Base):
 
 
 class GeneratedResume(Base):
-    """Generated resumes linked to jobs"""
+    """Generated resume with revision history, linked to a job"""
     __tablename__ = "generated_resumes"
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    content = Column(Text)  # The generated resume content
+    current_content = Column(Text)  # Latest version of the resume
+    revisions = Column(JSON, default=list)  # List of {version, content, feedback, timestamp}
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     job = relationship("Job", back_populates="resumes")
