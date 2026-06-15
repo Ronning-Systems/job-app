@@ -1,12 +1,12 @@
-# Authentication & Data Privacy Implementation Plan
+# Authentication, Model Right-Sizing & Resume Revisions Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Auth0 authentication with per-user data isolation to JobSync, protecting all API endpoints with JWT validation and isolating each user's data.
+**Goal:** Add Auth0 authentication with per-user data isolation, right-size LLM model usage per agent task, and add resume revision history with text-based feedback.
 
-**Architecture:** Auth0 handles login (Google/GitHub providers) and issues JWTs. The FastAPI backend validates JWTs via PyJWT against Auth0's JWKS endpoint, auto-provisions users on first login, and filters all data queries by `user_id`. The SPA frontend uses Auth0's JavaScript SDK for login/logout and attaches Bearer tokens to every API call.
+**Architecture:** Auth0 handles login (Google/GitHub providers) and issues JWTs. The FastAPI backend validates JWTs via PyJWT against Auth0's JWKS endpoint, auto-provisions users on first login, and filters all data queries by `user_id`. Each agent task uses the LLM model best suited for its complexity: minimax-m2.5 for job parsing (structured extraction), glm-5 for ATS/tech-fit analysis (structured JSON), and kimi-k2.5 for resume generation and revision (long-form creative output). Resume revisions are tracked as a versioned list within each job's generated resume record.
 
-**Tech Stack:** Auth0 (identity provider), PyJWT + cryptography (JWT validation), FastAPI Depends (auth middleware), Auth0 SPA SDK (frontend auth)
+**Tech Stack:** Auth0 (identity provider), PyJWT + cryptography (JWT validation), FastAPI Depends (auth middleware), Auth0 SPA SDK (frontend auth), Ollama Cloud (kimi-k2.5, glm-5, minimax-m2.5)
 
 ---
 
@@ -16,14 +16,15 @@
 backend/
 ├── auth.py              # NEW — JWT validation, user provisioning, FastAPI dependencies
 ├── ssrf.py              # NEW — SSRF URL validation helpers
-├── main.py              # MODIFY — add auth dependency to all endpoints, fix CORS, add auth routes
-├── models.py            # MODIFY — add User model, add user_id to all data tables
-├── agents.py            # MODIFY — update PyPDF2 → pypdf import
+├── main.py              # MODIFY — add auth dependency, fix CORS, add auth/revision routes
+├── models.py            # MODIFY — add User model, add user_id, change GeneratedResume to revisions list
+├── agents.py            # MODIFY — update PyPDF2 → pypdf, add MODEL_GENERATION for resume gen
+├── job_parser.py        # No changes (already uses MODEL_PARSING)
 ├── requirements.txt     # MODIFY — upgrade deps, add PyJWT, remove pypdf2
 static/
-└── index.html           # MODIFY — add Auth0 SDK, auth UI, wrap fetch calls
-Dockerfile               # MODIFY — add AUTH0_DOMAIN, AUTH0_AUDIENCE, CORS_ORIGIN env vars
-cloudbuild.yaml          # MODIFY — add AUTH0_DOMAIN, AUTH0_AUDIENCE, CORS_ORIGIN env vars
+└── index.html           # MODIFY — add Auth0 SDK, auth UI, wrap fetch calls, add revision UI
+Dockerfile               # MODIFY — add AUTH0_DOMAIN, AUTH0_AUDIENCE, CORS_ORIGIN, MODEL_GENERATION
+cloudbuild.yaml          # MODIFY — add AUTH0_DOMAIN, AUTH0_AUDIENCE, CORS_ORIGIN, rename MODEL_COMMANDS
 .env.example             # NEW — template for local development environment variables
 ```
 
@@ -1278,15 +1279,16 @@ In the `Dockerfile`, after the existing `ENV PYTHONPATH=/app/backend` line, add:
 ENV AUTH0_DOMAIN=""
 ENV AUTH0_AUDIENCE="https://jobsync/api"
 ENV CORS_ORIGIN="http://localhost:8000"
+ENV MODEL_GENERATION=""
 ```
 
-- [ ] **Step 2: Add env vars to cloudbuild.yaml**
+- [ ] **Step 2: Add env vars and rename MODEL_COMMANDS in cloudbuild.yaml**
 
-In `cloudbuild.yaml`, find the `--set-env-vars` line and add `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, and `CORS_ORIGIN`. The updated line should be:
+In `cloudbuild.yaml`, find the `--set-env-vars` line. Rename `MODEL_COMMANDS` to `MODEL_GENERATION` and move `kimi-k2.5:cloud` there. Add `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, and `CORS_ORIGIN`. The updated config should be:
 
 ```yaml
           - '--set-env-vars'
-          - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://jobsync-XXXXX-uc.a.run.app'
+          - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=kimi-k2.5:cloud,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://jobsync-XXXXX-uc.a.run.app'
 ```
 
 And add a new `--set-env-vars` for the Auth0 domain (which will be set after Auth0 tenant creation):
@@ -1331,7 +1333,7 @@ Create `.env.example` with:
 MODEL_ENDPOINT=http://localhost:11434
 MODEL_PARSING=llama3.2:latest
 MODEL_AGENTS=llama3.2:latest
-MODEL_COMMANDS=llama3.2:latest
+MODEL_GENERATION=llama3.2:latest
 # OLLAMA_API_KEY=  (not needed for local Ollama)
 
 # Auth0 Configuration
@@ -1531,6 +1533,545 @@ SPA application, API resource, refresh tokens, and social connections."
 
 ---
 
+### Task 11: Right-size LLM model usage per agent task
+
+**Files:**
+- Modify: `backend/agents.py` (OllamaAgent reads `MODEL_GENERATION` for resume gen)
+- Modify: `cloudbuild.yaml` (rename `MODEL_COMMANDS` → `MODEL_GENERATION`, assign `kimi-k2.5:cloud`)
+- Modify: `Dockerfile` (add `MODEL_GENERATION` env var)
+- Modify: `.env.example` (update model var names)
+
+Current state: All agents share `MODEL_AGENTS` (glm-5:cloud). `MODEL_COMMANDS` (kimi-k2.5:cloud) is unused. Resume generation needs a model optimized for long-form creative output, while ATS/tech-fit analysis only need structured JSON extraction.
+
+Target model assignments:
+| Task | Env Var | Model | Why |
+|------|---------|-------|-----|
+| Job parsing | `MODEL_PARSING` | `minimax-m2.5:cloud` | Structured extraction, fast, cheap |
+| ATS analysis | `MODEL_AGENTS` | `glm-5:cloud` | Structured JSON, moderate reasoning |
+| Technical fit | `MODEL_AGENTS` | `glm-5:cloud` | Structured JSON, moderate reasoning |
+| Resume generation | `MODEL_GENERATION` | `kimi-k2.5:cloud` | Long-form creative, follows detailed instructions |
+| Resume revision | `MODEL_GENERATION` | `kimi-k2.5:cloud` | Same — revision is generation with feedback |
+
+- [ ] **Step 1: Add MODEL_GENERATION to OllamaAgent class in agents.py**
+
+In `backend/agents.py`, find the `OllamaAgent.__init__` method. Add a `generation_model` attribute that reads from `MODEL_GENERATION`:
+
+```python
+class OllamaAgent:
+    """Base class for Ollama-powered agents"""
+
+    def __init__(self):
+        self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip(
+            "/"
+        )
+        self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
+        self.generation_model = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "llama3.2:latest")
+        self.api_key = os.getenv("OLLAMA_API_KEY", "")
+        self.timeout = 120.0
+```
+
+The `generation_model` falls back to `MODEL_AGENTS` if `MODEL_GENERATION` is not set, maintaining backward compatibility.
+
+- [ ] **Step 2: Update generate_resume to use generation_model**
+
+In the same `OllamaAgent` class, add a `generate_with_model` method that accepts a model override:
+
+```python
+    async def generate(
+        self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
+    ) -> str:
+        """Generate text using Ollama"""
+        url = f"{self.base_url}/api/generate"
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": 32000},
+        }
+
+        if system:
+            payload["system"] = system
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "")
+```
+
+Then in `AgentService.generate_resume`, pass `model=self.ollama.generation_model` to the generate call:
+
+```python
+            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+```
+
+- [ ] **Step 3: Update cloudbuild.yaml — rename MODEL_COMMANDS to MODEL_GENERATION**
+
+In `cloudbuild.yaml`, change the `--set-env-vars` line. Replace `MODEL_COMMANDS=kimi-k2.5:cloud` with `MODEL_GENERATION=kimi-k2.5:cloud`:
+
+```yaml
+          - '--set-env-vars'
+          - 'MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=kimi-k2.5:cloud,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://jobsync-XXXXX-uc.a.run.app'
+```
+
+- [ ] **Step 4: Verify the change compiles**
+
+Run:
+```bash
+cd backend && source venv/bin/activate && python -c "from agents import agent_service; print('generation_model:', agent_service.ollama.generation_model); print('OK')"
+```
+
+Expected: Prints the model name (may fall back to MODEL_AGENTS if env var not set locally) and `OK`.
+
+- [ ] **Step 5: Commit model right-sizing**
+
+```bash
+git add backend/agents.py cloudbuild.yaml
+git commit -m "feat: right-size LLM models per agent task
+
+- Add MODEL_GENERATION env var for resume generation/revision (kimi-k2.5)
+- Rename MODEL_COMMANDS to MODEL_GENERATION in cloudbuild.yaml
+- OllamaAgent.generate() accepts optional model override
+- Resume generation uses generation_model (long-form creative)
+- ATS/tech-fit analysis stays on MODEL_AGENTS (structured JSON)
+- Job parsing stays on MODEL_PARSING (fast extraction)"
+```
+
+---
+
+### Task 12: Add resume revision history
+
+**Files:**
+- Modify: `backend/models.py` (change GeneratedResume to store revision list)
+- Modify: `backend/main.py` (add revision endpoint, update generate endpoint)
+- Modify: `backend/agents.py` (add revise_resume method)
+- Modify: `static/index.html` (add revision text input, revision history display)
+
+Currently, each generated resume is a single `GeneratedResume` row. When you regenerate, a new row is created and the old one is lost. The user wants: one resume per job, with all revisions kept. Revisions are triggered by a text feedback input ("make it more technical", "emphasize leadership").
+
+**Data model change:** Instead of multiple `GeneratedResume` rows per job, store a single `GeneratedResume` with a JSON `revisions` list:
+
+```
+GeneratedResume
+├── id              INTEGER (primary key)
+├── job_id          INTEGER FK → jobs.id
+├── user_id         INTEGER FK → users.id
+├── current_content TEXT        (latest resume text)
+├── revisions       JSON        (list of {content, feedback, timestamp, version})
+├── created_at      TIMESTAMP
+└── updated_at      TIMESTAMP
+```
+
+Each revision entry:
+```json
+{
+  "version": 1,
+  "content": "resume text...",
+  "feedback": null,           // null for initial generation
+  "timestamp": "2026-06-14T..."
+}
+```
+
+Subsequent revisions:
+```json
+{
+  "version": 2,
+  "content": "updated resume text...",
+  "feedback": "Make it more technical, emphasize cloud experience",
+  "timestamp": "2026-06-14T..."
+}
+```
+
+- [ ] **Step 1: Update GeneratedResume model in models.py**
+
+Find the `GeneratedResume` class in `backend/models.py`. Replace it with:
+
+```python
+class GeneratedResume(Base):
+    """Generated resume with revision history, linked to a job"""
+    __tablename__ = "generated_resumes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    current_content = Column(Text)  # Latest version of the resume
+    revisions = Column(JSON, default=list)  # List of {version, content, feedback, timestamp}
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    job = relationship("Job", back_populates="resumes")
+```
+
+- [ ] **Step 2: Update main.py generate-resume endpoint to use new model**
+
+Find the `generate_job_resume` endpoint. After generating the resume content, save it with the revision structure:
+
+```python
+    # Save to GeneratedResume table (create or update)
+    existing_resume = db.query(GeneratedResume).filter(
+        GeneratedResume.job_id == job_id
+    ).first()
+
+    if existing_resume:
+        # Append new revision
+        revisions = existing_resume.revisions or []
+        next_version = len(revisions) + 1
+        revisions.append({
+            "version": next_version,
+            "content": resume_content,
+            "feedback": None,  # Initial generation, no feedback
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        existing_resume.current_content = resume_content
+        existing_resume.revisions = revisions
+        existing_resume.updated_at = datetime.utcnow()
+        generated_resume = existing_resume
+    else:
+        # Create new resume with first revision
+        generated_resume = GeneratedResume(
+            job_id=job_id,
+            user_id=current_user.id,
+            current_content=resume_content,
+            revisions=[{
+                "version": 1,
+                "content": resume_content,
+                "feedback": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            }],
+        )
+        db.add(generated_resume)
+
+    job.updated_at = datetime.utcnow()
+    db.commit()
+```
+
+Update the response to include revisions:
+
+```python
+    return {
+        "job_id": job_id,
+        "resume": resume_content,
+        "resume_id": generated_resume.id,
+        "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
+        "revisions": generated_resume.revisions,
+    }
+```
+
+- [ ] **Step 3: Add revise-resume endpoint to main.py**
+
+Add a new endpoint after the generate-resume endpoint:
+
+```python
+@app.post("/api/jobs/{job_id}/revise-resume")
+async def revise_job_resume(
+    job_id: int,
+    request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Revise a generated resume based on user feedback. Appends a new revision."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    feedback = request.get("feedback", "")
+    if not feedback:
+        raise HTTPException(status_code=400, detail="Feedback is required")
+
+    # Get existing resume
+    existing_resume = db.query(GeneratedResume).filter(
+        GeneratedResume.job_id == job_id
+    ).first()
+    if not existing_resume or not existing_resume.current_content:
+        raise HTTPException(status_code=404, detail="No generated resume found. Generate one first.")
+
+    # Get example resumes and template
+    example_resumes = request.get("example_resumes", [])
+    template = request.get("template", None)
+
+    if not example_resumes:
+        example_resumes_db = db.query(BaseResume).filter(
+            BaseResume.resume_type == "example",
+            BaseResume.user_id == current_user.id
+        ).all()
+        example_resumes = [{"name": r.name, "content": r.content} for r in example_resumes_db]
+
+    if not template:
+        template_db = db.query(BaseResume).filter(
+            BaseResume.resume_type == "template",
+            BaseResume.user_id == current_user.id
+        ).first()
+        template = {"name": template_db.name, "content": template_db.content} if template_db else None
+
+    # Generate revised resume using agent service
+    resume_result = await agent_service.revise_resume(
+        current_resume=existing_resume.current_content,
+        feedback=feedback,
+        job_description=job.job_description_parsed or job.job_description_raw,
+        example_resumes=example_resumes,
+        template=template,
+        target_role=job.position,
+    )
+
+    import json
+    resume_content = resume_result.get("content", json.dumps(resume_result))
+
+    # Append new revision
+    revisions = existing_resume.revisions or []
+    next_version = len(revisions) + 1
+    revisions.append({
+        "version": next_version,
+        "content": resume_content,
+        "feedback": feedback,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    existing_resume.current_content = resume_content
+    existing_resume.revisions = revisions
+    existing_resume.updated_at = datetime.utcnow()
+    job.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "job_id": job_id,
+        "resume": resume_content,
+        "resume_id": existing_resume.id,
+        "version": next_version,
+        "revisions": revisions,
+    }
+```
+
+- [ ] **Step 4: Add revise_resume method to AgentService in agents.py**
+
+In `backend/agents.py`, add a `revise_resume` method to the `AgentService` class, after the `generate_resume` method:
+
+```python
+    async def revise_resume(
+        self,
+        current_resume: str,
+        feedback: str,
+        job_description: Optional[str] = None,
+        example_resumes: Optional[List[Dict]] = None,
+        template: Optional[Dict] = None,
+        target_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Revise an existing resume based on user feedback via Ollama.
+        Uses MODEL_GENERATION (kimi-k2.5) for long-form creative output.
+        """
+        agent_prompt = self._load_agent_prompt("resume-generator")
+
+        # Build example resumes section (same as generate_resume)
+        example_resumes_section = ""
+        if example_resumes:
+            example_resumes_section = "\n\nEXAMPLE RESUMES (reference for style and content):\n"
+            for idx, example in enumerate(example_resumes):
+                name = example.get("name", f"Example {idx + 1}")
+                content = example.get("content", "")
+                if content and content.startswith("data:"):
+                    content = extract_text_from_file(content, name)
+                example_resumes_section += f"\n--- Example {idx + 1}: {name} ---\n{content[:40000]}\n"
+
+        template_section = ""
+        if template:
+            template_content = template.get("content", "")
+            if template_content and template_content.startswith("data:"):
+                template_content = extract_text_from_file(
+                    template_content, template.get("name", "template.docx")
+                )
+            template_section = f"\nTEMPLATE (formatting only):\n{template_content[:8000]}\n"
+
+        job_desc_section = f"JOB DESCRIPTION:\n{job_description[:16000]}" if job_description else ""
+
+        prompt = f"""{agent_prompt}
+
+You are REVISING an existing resume based on the user's feedback.
+
+TARGET ROLE: {target_role or "Not specified"}
+
+CURRENT RESUME:
+---
+{current_resume}
+---
+
+USER FEEDBACK (apply these changes):
+---
+{feedback}
+---
+
+{example_resumes_section}
+
+{template_section}
+
+{job_desc_section}
+
+CRITICAL INSTRUCTIONS:
+1. Start from the CURRENT RESUME and make the specific changes requested in the FEEDBACK
+2. Preserve all existing content that the user did NOT ask to change
+3. Do NOT remove any jobs, education, or experience unless the feedback explicitly asks for it
+4. Follow the same strict rules about not fabricating experience (see original instructions)
+5. Output the COMPLETE revised resume (not just the changed sections)
+
+Output format: Plain text resume only. No JSON."""
+
+        try:
+            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            if not response:
+                raise Exception("Empty response from Ollama")
+            return {"content": response.strip()}
+        except Exception as e:
+            logger.info(f"[ResumeRevise] Error: {e}")
+            return {"error": str(e), "content": f"Error revising resume: {str(e)}"}
+```
+
+- [ ] **Step 5: Update format_job_response in main.py**
+
+Find the `format_job_response` function. Update the generated resume section to use `current_content` instead of `content`:
+
+```python
+    # Get latest generated resume
+    generated_resume = None
+    if db:
+        latest_resume = (
+            db.query(GeneratedResume)
+            .filter(GeneratedResume.job_id == job.id)
+            .order_by(GeneratedResume.created_at.desc())
+            .first()
+        )
+        if latest_resume:
+            generated_resume = latest_resume.current_content
+```
+
+- [ ] **Step 6: Add revision UI to frontend**
+
+In `static/index.html`, add a revision feedback text box in the job detail view (where the generated resume is displayed). Find the section where the generated resume is shown. After the "Generate Resume" button area, add:
+
+```html
+<div class="revision-section" id="revision-section" style="display: none; margin-top: 16px;">
+    <h4>Revise Resume</h4>
+    <textarea id="revision-feedback" rows="3" placeholder="Describe changes: e.g., 'Make it more technical', 'Emphasize cloud experience', 'Shorten the summary section'" style="width: 100%; padding: 8px; border: 1px solid var(--gray-300); border-radius: 8px; font-family: inherit; resize: vertical;"></textarea>
+    <button onclick="submitRevision()" style="margin-top: 8px; background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">Revise</button>
+    <div id="revision-history" style="margin-top: 16px;"></div>
+</div>
+```
+
+Add the `submitRevision` JavaScript function:
+
+```javascript
+async function submitRevision() {
+    const feedback = document.getElementById('revision-feedback').value.trim();
+    if (!feedback) {
+        alert('Please enter feedback for the revision');
+        return;
+    }
+    try {
+        const response = await apiFetch(`${API_URL}/jobs/${currentJobId}/revise-resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ feedback: feedback })
+        });
+        if (!response.ok) throw new Error('Revision failed');
+        const data = await response.json();
+        // Update the displayed resume
+        document.getElementById('generated-resume-content').textContent = data.resume;
+        document.getElementById('revision-feedback').value = '';
+        displayRevisionHistory(data.revisions);
+    } catch (err) {
+        alert('Error revising resume: ' + err.message);
+    }
+}
+
+function displayRevisionHistory(revisions) {
+    const container = document.getElementById('revision-history');
+    if (!revisions || revisions.length <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+    let html = '<h4>Revision History</h4>';
+    // Show revisions in reverse order (newest first)
+    const sorted = [...revisions].reverse();
+    sorted.forEach(rev => {
+        const date = new Date(rev.timestamp).toLocaleString();
+        const feedbackText = rev.feedback ? `<em>"${rev.feedback}"</em>` : '<em>Initial generation</em>';
+        html += `
+            <div style="padding: 8px; margin: 4px 0; border-left: 3px solid var(--primary); background: var(--gray-50); border-radius: 0 8px 8px 0; cursor: pointer;" onclick="showRevisionVersion(${rev.version})">
+                <strong>v${rev.version}</strong> — ${date}
+                <div style="font-size: 0.85rem; color: var(--gray-500); margin-top: 2px;">${feedbackText}</div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+function showRevisionVersion(version) {
+    // Find the revision content and display it
+    // This requires the revisions data to be available in the current job state
+    if (currentJobRevisions) {
+        const rev = currentJobRevisions.find(r => r.version === version);
+        if (rev) {
+            document.getElementById('generated-resume-content').textContent = rev.content;
+        }
+    }
+}
+```
+
+Add a global variable to track revisions in the job detail view:
+
+```javascript
+let currentJobRevisions = null;
+```
+
+And in the job detail fetch function (where the generated resume is displayed), after loading the job, show the revision section and history:
+
+```javascript
+// After displaying generated resume content:
+if (data.generated_resume) {
+    document.getElementById('revision-section').style.display = 'block';
+}
+// When fetching job detail, also get revisions from generate-resume response:
+// (The /api/jobs/{id} endpoint should include revisions in its response)
+```
+
+Update the `generate_job_resume` function in the frontend to also display revision history after generation:
+
+```javascript
+// After successful resume generation:
+if (data.revisions) {
+    currentJobRevisions = data.revisions;
+    displayRevisionHistory(data.revisions);
+}
+```
+
+- [ ] **Step 7: Verify the backend compiles**
+
+Run:
+```bash
+cd backend && source venv/bin/activate && python -c "from agents import agent_service; print('revise_resume' in dir(agent_service)); print('OK')"
+```
+
+Expected: `True` then `OK`
+
+- [ ] **Step 8: Commit resume revision feature**
+
+```bash
+git add backend/models.py backend/main.py backend/agents.py static/index.html
+git commit -m "feat: add resume revision history with text feedback
+
+- GeneratedResume now stores revisions as JSON list
+- Each revision: {version, content, feedback, timestamp}
+- New POST /api/jobs/{id}/revise-resume endpoint
+- AgentService.revise_resume() uses MODEL_GENERATION
+- Frontend: feedback text box, revision history display
+- Click a revision to view that version of the resume"
+```
+
+---
+
 ## Self-Review Checklist
 
 **Spec coverage:**
@@ -1547,6 +2088,8 @@ SPA application, API resource, refresh tokens, and social connections."
 - ✅ Deployment config updates → Task 7
 - ✅ .env.example → Task 8
 - ✅ Auth0 setup documentation → Task 10
+- ✅ Model right-sizing (MODEL_GENERATION for resume gen) → Task 11
+- ✅ Resume revision history with text feedback → Task 12
 
 **Placeholder scan:**
 - ✅ No TBD, TODO, or "implement later" in any step
@@ -1557,5 +2100,7 @@ SPA application, API resource, refresh tokens, and social connections."
 **Type consistency:**
 - ✅ `get_current_user` returns `User` in auth.py, used as `User` in main.py
 - ✅ `apiFetch` in frontend matches all `fetch` replacements
-- ✅ `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `CORS_ORIGIN` env var names consistent across Dockerfile, cloudbuild.yaml, auth.py, and index.html
+- ✅ `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `CORS_ORIGIN`, `MODEL_GENERATION` env var names consistent across Dockerfile, cloudbuild.yaml, agents.py, and index.html
 - ✅ `is_url_safe()` returns `(bool, str)` tuple, used correctly in fetch-job endpoint
+- ✅ `GeneratedResume.current_content` replaces `.content` in format_job_response
+- ✅ `OllamaAgent.generation_model` used in `generate_resume` and `revise_resume`
