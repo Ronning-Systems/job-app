@@ -1,6 +1,9 @@
 .DS_Store
 /.env
-.db
-backend/backend.log
+*.db
+*.log
 .claude/
-.log
+__pycache__/
+*.pyc
+backend/venv/
+mcp_server/venv/
