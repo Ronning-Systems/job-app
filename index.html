@@ -1114,8 +1114,9 @@ The AI will automatically extract:
         const editForm = document.getElementById('edit-form');
 
         // API Base URL
-        const API_URL = window.location.hostname === 'jobsync.ronning.systems'
-            ? 'https://jobsync.ronning.systems/api'
+        const isProduction = window.location.hostname === 'jobsync.ronning.systems' || window.location.hostname.endsWith('.run.app');
+        const API_URL = isProduction
+            ? `${window.location.origin}/api`
             : 'http://localhost:8765/api';
 
         // ─── Auth0 Configuration ───
