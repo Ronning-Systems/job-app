@@ -21,6 +21,6 @@ EXPOSE 8080
 ENV PYTHONPATH=/app/backend
 ENV AUTH0_DOMAIN=""
 ENV AUTH0_AUDIENCE="https://jobsync/api"
-ENV CORS_ORIGIN="http://localhost:8000"
+ENV CORS_ORIGIN="https://jobsync.ronning.systems,http://localhost:8765"
 ENV MODEL_GENERATION=""
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
