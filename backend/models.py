@@ -122,12 +122,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
     # Production: PostgreSQL (e.g., Cloud SQL via Unix socket)
-    logger.info("Using PostgreSQL database from DATABASE_URL")
+    logger.info(f"Using PostgreSQL database from DATABASE_URL")
     engine = create_engine(
         DATABASE_URL,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=2,
+        max_overflow=2,
         pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={"connect_timeout": 10},
     )
 else:
     # Local dev: SQLite fallback
@@ -140,7 +142,14 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.error(f"Database init failed: {e}")
+        if not DATABASE_URL:
+            raise  # SQLite should always work
+        # For PostgreSQL, log but don't crash — the app can retry on first request
+        logger.warning("PostgreSQL connection failed during startup; will retry on first request")
 
 
 def get_db():
