@@ -8,15 +8,15 @@ import httpx
 
 
 class OllamaClient:
-    """Client for calling Ollama API"""
+    """Client for calling Ollama API (local or cloud)"""
 
     def __init__(self):
-        # Get Ollama endpoint from environment, default to localhost
         self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip('/')
-        # Use MODEL_PARSING for job parsing, fallback to OLLAMA_MODEL or default
         self.model = os.getenv("MODEL_PARSING") or os.getenv("OLLAMA_MODEL") or "llama3.2:latest"
         self.api_key = os.getenv("OLLAMA_API_KEY", "")
-        print(f"[OllamaClient] Using model: {self.model} at {self.base_url}")
+        # Ollama Cloud uses OpenAI-compatible chat endpoint
+        self.is_cloud = "ollama.com" in self.base_url
+        print(f"[OllamaClient] Using model: {self.model} at {self.base_url} (cloud={self.is_cloud})")
 
     async def parse_job_description(self, text: str) -> Dict[str, Any]:
         """Use Ollama to parse job description into structured data"""
@@ -47,33 +47,44 @@ JSON Output:"""
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        headers["Content-Type"] = "application/json"
 
         response_text = ""
         try:
-            print(f"[OllamaClient] Sending request to {self.base_url}/api/generate with model {self.model}")
+            if self.is_cloud:
+                # Ollama Cloud: OpenAI-compatible /v1/chat/completions
+                url = f"{self.base_url}/v1/chat/completions"
+                payload = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                }
+            else:
+                # Local Ollama: /api/generate
+                url = f"{self.base_url}/api/generate"
+                payload = {
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 2000},
+                }
+
+            print(f"[OllamaClient] Sending request to {url} with model {self.model}")
             async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.1,
-                            "num_predict": 2000
-                        }
-                    },
-                    headers=headers
-                )
+                response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 result = response.json()
 
-                # Parse the response
-                response_text = result.get("response", "").strip()
+                # Parse the response based on API format
+                if self.is_cloud:
+                    response_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                else:
+                    response_text = result.get("response", "").strip()
+
                 print(f"[OllamaClient] Got response: {response_text[:200]}...")
 
                 # Try to extract JSON from the response
-                # Handle cases where model wraps JSON in markdown code blocks
                 json_text = response_text
                 if "```json" in response_text:
                     json_text = response_text.split("```json")[1].split("```")[0].strip()

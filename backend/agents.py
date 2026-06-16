@@ -90,7 +90,7 @@ def _extract_docx_text(file_bytes: bytes) -> str:
 
 
 class OllamaAgent:
-    """Base class for Ollama-powered agents"""
+    """Base class for Ollama-powered agents (local or cloud)"""
 
     def __init__(self):
         self.base_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip(
@@ -99,33 +99,53 @@ class OllamaAgent:
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
         self.generation_model = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "llama3.2:latest")
         self.api_key = os.getenv("OLLAMA_API_KEY", "")
+        self.is_cloud = "ollama.com" in self.base_url
         self.timeout = 120.0
 
     async def generate(
         self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
     ) -> str:
-        """Generate text using Ollama"""
-        url = f"{self.base_url}/api/generate"
-
+        """Generate text using Ollama (local or cloud)"""
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        headers["Content-Type"] = "application/json"
 
-        payload = {
-            "model": model or self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": 32000},
-        }
+        model_name = model or self.model
 
-        if system:
-            payload["system"] = system
+        if self.is_cloud:
+            # Ollama Cloud: OpenAI-compatible /v1/chat/completions
+            url = f"{self.base_url}/v1/chat/completions"
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": 32000,
+            }
+        else:
+            # Local Ollama: /api/generate
+            url = f"{self.base_url}/api/generate"
+            payload = {
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": temperature, "num_predict": 32000},
+            }
+            if system:
+                payload["system"] = system
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-            return data.get("response", "")
+            if self.is_cloud:
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                return data.get("response", "")
 
 
 class AgentService:
