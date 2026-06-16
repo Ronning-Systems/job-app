@@ -51,11 +51,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Job Tracker API")
 
 # CORS
-CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost:8000")
+CORS_ORIGINS = os.getenv("CORS_ORIGIN", "http://localhost:8765,https://jobsync.ronning.systems").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CORS_ORIGIN],
-    allow_credentials=False,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -851,4 +851,5 @@ async def serve_frontend(full_path: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", "8765"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
