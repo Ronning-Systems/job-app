@@ -700,6 +700,14 @@
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+        <div style="background:white; border-radius:16px; padding:32px 40px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <i class="fas fa-spinner fa-spin" style="font-size:2rem; color:var(--primary); margin-bottom:16px; display:block;"></i>
+            <p id="loading-overlay-text" style="margin:0; font-size:1rem; color:var(--gray-700);">Loading...</p>
+        </div>
+    </div>
+
     <div class="auth-overlay" id="auth-overlay" style="display: none;">
         <div class="auth-modal">
             <h2>JobSync</h2>
@@ -991,25 +999,25 @@ The AI will automatically extract:
 
     <!-- Resume Editor Modal -->
     <div class="modal-overlay" id="resume-editor-modal" style="z-index: 2000;">
-        <div class="modal" style="max-width: 900px; height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal" style="max-width: 900px; width: 100%; height: 90vh; max-height: 95vh; display: flex; flex-direction: column; margin: 10px;">
             <div class="modal-header">
                 <h2><i class="fas fa-edit"></i> Edit Resume</h2>
                 <button class="btn-close" id="btn-close-resume-editor">&times;</button>
             </div>
-            <div class="modal-body" style="flex: 1; padding: 0; display: flex; flex-direction: column; overflow: hidden;">
-                <div style="padding: 16px 24px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
-                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <div class="modal-body" style="flex: 1; padding: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+                <div style="padding: 12px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <span style="font-weight: 500; color: var(--gray-700);">Job:</span>
                         <span id="resume-editor-job-title" style="color: var(--primary); font-weight: 600;"></span>
                         <span style="color: var(--gray-400);">|</span>
                         <span id="resume-editor-company" style="color: var(--gray-600);"></span>
                     </div>
                 </div>
-                <textarea id="resume-editor-content" style="flex: 1; width: 100%; padding: 24px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none;"></textarea>
+                <textarea id="resume-editor-content" style="flex: 1; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch;"></textarea>
             </div>
-            <div class="modal-footer" style="justify-content: space-between;">
+            <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <button class="btn btn-secondary" id="btn-cancel-resume-editor">Close</button>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button class="btn btn-secondary" id="btn-regenerate-resume">
                         <i class="fas fa-sync-alt"></i> Regenerate
                     </button>
@@ -1112,6 +1120,18 @@ The AI will automatically extract:
         const editModal = document.getElementById('edit-modal');
         const jobForm = document.getElementById('job-form');
         const editForm = document.getElementById('edit-form');
+
+        // Loading overlay helpers
+        function showLoadingOverlay(text) {
+            const overlay = document.getElementById('loading-overlay');
+            const textEl = document.getElementById('loading-overlay-text');
+            if (textEl) textEl.textContent = text || 'Loading...';
+            if (overlay) { overlay.style.display = 'flex'; }
+        }
+        function hideLoadingOverlay() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) { overlay.style.display = 'none'; }
+        }
 
         // API Base URL
         const isProduction = window.location.hostname === 'jobsync.ronning.systems' || window.location.hostname.endsWith('.run.app');
@@ -2141,18 +2161,13 @@ The AI will automatically extract:
 
             if (!hasExampleResumes && !hasTemplate) {
                 alert('Please upload example resumes or a template in Resume Settings first.');
-                resumeSettingsModal.classList.add('active');
+                document.getElementById('resume-settings-modal').classList.add('active');
                 return;
             }
 
+            // Show loading overlay for mobile reliability
+            showLoadingOverlay('Generating resume...');
             try {
-                // Show loading state
-                const btn = document.querySelector(`button[onclick="generateResume(${jobId})"]`);
-                if (btn) {
-                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
-                    btn.disabled = true;
-                }
-
                 // Call the resume generation API
                 const response = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume`, {
                     method: 'POST',
@@ -2164,7 +2179,8 @@ The AI will automatically extract:
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to generate resume');
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || 'Failed to generate resume');
                 }
 
                 const result = await response.json();
@@ -2183,13 +2199,9 @@ The AI will automatically extract:
 
             } catch (error) {
                 console.error('Error generating resume:', error);
-                alert('Error generating resume. Please try again.');
-
-                // Reset button state
-                if (btn) {
-                    btn.innerHTML = '<i class="fas fa-magic"></i> Generate Resume';
-                    btn.disabled = false;
-                }
+                alert('Error generating resume: ' + error.message);
+            } finally {
+                hideLoadingOverlay();
             }
         };
 
