@@ -439,7 +439,7 @@ async def generate_job_resume(
         f"[generate-resume] After get - example_resumes: {example_resumes}, template: {template}"
     )
 
-    # Fall back to database if not provided in request
+    # Fall back to database if not provided in request, or enrich with content if missing
     if not example_resumes:
         example_resumes_db = (
             db.query(BaseResume).filter(BaseResume.resume_type == "example", BaseResume.user_id == current_user.id).all()
@@ -450,6 +450,29 @@ async def generate_job_resume(
         logger.info(
             f"[generate-resume] Fell back to DB - example_resumes: {len(example_resumes)} found"
         )
+    else:
+        # Frontend sends metadata only (id, name) without content — enrich from DB
+        for er in example_resumes:
+            if not er.get("content"):
+                resume_id = er.get("id")
+                if resume_id:
+                    db_resume = db.query(BaseResume).filter(
+                        BaseResume.id == resume_id,
+                        BaseResume.user_id == current_user.id
+                    ).first()
+                    if db_resume:
+                        er["content"] = db_resume.content
+                        logger.info(f"[generate-resume] Enriched example resume {er.get('name')} with DB content")
+                else:
+                    # No id — try to find by name
+                    db_resume = db.query(BaseResume).filter(
+                        BaseResume.resume_type == "example",
+                        BaseResume.user_id == current_user.id,
+                        BaseResume.name == er.get("name")
+                    ).first()
+                    if db_resume:
+                        er["content"] = db_resume.content
+                        logger.info(f"[generate-resume] Enriched example resume {er.get('name')} with DB content (by name)")
 
     if not template:
         template_db = (
@@ -464,6 +487,10 @@ async def generate_job_resume(
             f"[generate-resume] Fell back to DB - template: {template_db.name if template_db else None}"
         )
 
+    # Get optional model override from request
+    model_override = resume_request.get("model")
+    logger.info(f"[generate-resume] Model override: {model_override}")
+
     # Generate resume using agent service
     resume_result = await agent_service.generate_resume(
         user_profile={},
@@ -471,6 +498,7 @@ async def generate_job_resume(
         example_resumes=example_resumes,
         template=template,
         target_role=job.position,
+        model_override=model_override,
     )
 
     # Get the content from the result

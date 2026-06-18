@@ -100,7 +100,7 @@ class OllamaAgent:
         self.generation_model = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "llama3.2:latest")
         self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.is_cloud = "ollama.com" in self.base_url
-        self.timeout = 120.0
+        self.timeout = 240.0
 
     async def generate(
         self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
@@ -314,6 +314,7 @@ Respond with ONLY a JSON object in this format:
         example_resumes: Optional[List[Dict]] = None,
         template: Optional[Dict] = None,
         target_role: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a resume using the Resume Generator Agent via Ollama.
@@ -328,12 +329,18 @@ Respond with ONLY a JSON object in this format:
         logger.info(f"[ResumeGenerator] Received template: {template}")
 
         # Build example resumes section
+        # Limit to 3 most recent resumes and cap total text to avoid model timeouts
+        MAX_EXAMPLES = 3
+        MAX_TOTAL_CHARS = 20000
         example_resumes_section = ""
         if example_resumes:
             example_resumes_section = (
                 "\n\nEXAMPLE RESUMES (reference for style and content):\n"
             )
-            for idx, example in enumerate(example_resumes):
+            # Use last N resumes (most recently uploaded)
+            selected = example_resumes[-MAX_EXAMPLES:] if len(example_resumes) > MAX_EXAMPLES else example_resumes
+            total_chars = 0
+            for idx, example in enumerate(selected):
                 name = example.get("name", f"Example {idx + 1}")
                 content = example.get("content", "")
 
@@ -343,9 +350,17 @@ Respond with ONLY a JSON object in this format:
                         f"[ResumeGenerator] Extracted text from example {idx + 1}: {name}, length: {len(content)}"
                     )
 
+                # Truncate individual resume and stop if we exceed total budget
+                remaining = MAX_TOTAL_CHARS - total_chars
+                if remaining <= 0:
+                    logger.info(f"[ResumeGenerator] Hit total char budget, skipping remaining examples")
+                    break
+                truncated = content[:min(8000, remaining)]
+                total_chars += len(truncated)
                 example_resumes_section += (
-                    f"\n--- Example {idx + 1}: {name} ---\n{content[:40000]}\n"
+                    f"\n--- Example {idx + 1}: {name} ---\n{truncated}\n"
                 )
+            logger.info(f"[ResumeGenerator] Total example text: {total_chars} chars from {len(selected)} resumes")
 
         # Build template section
         template_section = ""
@@ -407,7 +422,9 @@ Job Description (use ONLY to tailor wording, not to invent experience):
 Output format: Plain text resume only. No JSON needed. Include ALL positions and ALL education."""
 
         try:
-            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            model = model_override or self.ollama.generation_model
+            logger.info(f"[ResumeGenerator] Using model: {model}")
+            response = await self.ollama.generate(prompt, temperature=0.7, model=model)
             logger.info(f"[ResumeGenerator] Raw response length: {len(response)}")
 
             if not response:
