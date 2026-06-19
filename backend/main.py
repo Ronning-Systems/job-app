@@ -135,6 +135,7 @@ class JobResponse(BaseModel):
     notes: Optional[str]
     keywords: Optional[list]
     generated_resume: Optional[str]
+    resume_revisions: Optional[list] = []
     created_at: datetime
 
     class Config:
