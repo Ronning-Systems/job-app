@@ -1026,6 +1026,10 @@ The AI will automatically extract:
                             <option value="gpt-oss:20b-cloud">GPT-OSS 20B</option>
                             <option value="gpt-oss:120b-cloud">GPT-OSS 120B</option>
                         </select>
+                        <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
+                        <select id="resume-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
+                            <option value="">Current</option>
+                        </select>
                     </div>
                 </div>
                 <textarea id="resume-editor-content" style="flex: 1; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch;"></textarea>
@@ -1911,6 +1915,18 @@ The AI will automatically extract:
 
         document.getElementById('btn-export-resume').addEventListener('click', exportResumeToDocx);
 
+        // Version history dropdown — load selected version into editor
+        document.getElementById('resume-version-select').addEventListener('change', (e) => {
+            const job = jobs.find(j => j.id === currentEditingJobId);
+            if (!job || !job.resume_revisions) return;
+            const version = parseInt(e.target.value);
+            if (!version) return; // "Current" selected
+            const rev = job.resume_revisions.find(r => r.version === version);
+            if (rev) {
+                document.getElementById('resume-editor-content').value = rev.content || '';
+            }
+        });
+
         // File upload zones
         const exampleResumesZone = document.getElementById('example-resumes-zone');
         const exampleResumesInput = document.getElementById('example-resumes-input');
@@ -2184,10 +2200,14 @@ The AI will automatically extract:
             const modelSelect = document.getElementById('resume-model-select');
             const selectedModel = modelSelect ? modelSelect.value : '';
 
-            // Show loading overlay for mobile reliability
+            // Show loading overlay
             showLoadingOverlay(selectedModel ? `Generating resume with ${selectedModel}...` : 'Generating resume...');
+
+            // Update overlay text to show polling status
+            const overlayText = document.getElementById('loading-overlay-text');
+
             try {
-                // Call the resume generation API
+                // Fire the generation request (returns immediately with status: processing)
                 const body = {
                     example_resumes: settings.exampleResumes || [],
                     template: settings.templateFile
@@ -2202,22 +2222,54 @@ The AI will automatically extract:
 
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({}));
-                    throw new Error(errData.detail || 'Failed to generate resume');
+                    throw new Error(errData.detail || 'Failed to start resume generation');
                 }
 
                 const result = await response.json();
 
-                // Save the generated resume to the job
-                job.generated_resume = {
-                    content: result.resume,
-                    generatedAt: new Date().toISOString()
-                };
+                // If the response already has the resume (backwards compat), use it directly
+                if (result.resume) {
+                    job.generated_resume = result.resume;
+                    job.resume_revisions = result.revisions || [];
+                    await fetchJobs();
+                    openResumeEditor(jobId);
+                    return;
+                }
 
-                // Refresh the display
-                await fetchJobs();
+                // Poll for completion
+                const pollInterval = 3000; // 3 seconds
+                const maxPollTime = 270000; // 4.5 minutes (Cloud Run timeout is 300s)
+                const startTime = Date.now();
 
-                // Open the editor with the generated resume
-                openResumeEditor(jobId);
+                while (Date.now() - startTime < maxPollTime) {
+                    await new Promise(r => setTimeout(r, pollInterval));
+
+                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    if (overlayText) overlayText.textContent = `Generating resume... (${elapsed}s)`;
+
+                    const pollResponse = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume/status`);
+
+                    if (!pollResponse.ok) {
+                        const errData = await pollResponse.json().catch(() => ({}));
+                        throw new Error(errData.detail || 'Failed to check generation status');
+                    }
+
+                    const pollResult = await pollResponse.json();
+
+                    if (pollResult.status === 'completed') {
+                        // Generation finished — load the result
+                        job.generated_resume = pollResult.resume;
+                        job.resume_revisions = pollResult.revisions || [];
+                        await fetchJobs();
+                        openResumeEditor(jobId);
+                        return;
+                    } else if (pollResult.status === 'error') {
+                        throw new Error(pollResult.error || 'Generation failed');
+                    }
+                    // else still processing — keep polling
+                }
+
+                throw new Error('Resume generation timed out. Please try again.');
 
             } catch (error) {
                 console.error('Error generating resume:', error);
@@ -2255,9 +2307,33 @@ The AI will automatically extract:
 
             document.getElementById('resume-editor-job-title').textContent = job.position;
             document.getElementById('resume-editor-company').textContent = job.company;
+            
             // Handle both object and string formats for generated_resume
             const resumeContent = typeof job.generated_resume === 'object' ? job.generated_resume.content : job.generated_resume;
             document.getElementById('resume-editor-content').value = resumeContent || '';
+
+            // Populate version dropdown
+            const versionSelect = document.getElementById('resume-version-select');
+            if (versionSelect) {
+                versionSelect.innerHTML = '';
+                const revisions = job.resume_revisions || [];
+                if (revisions.length === 0) {
+                    versionSelect.innerHTML = '<option value="">Current</option>';
+                } else {
+                    // Show revisions newest-first
+                    const sorted = [...revisions].reverse();
+                    sorted.forEach((rev, idx) => {
+                        const isLatest = (idx === 0);
+                        const ts = rev.timestamp ? new Date(rev.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+                        const label = isLatest ? `v${rev.version} (current)` : `v${rev.version}`;
+                        const displayLabel = ts ? `${label} — ${ts}` : label;
+                        const option = document.createElement('option');
+                        option.value = rev.version;
+                        option.textContent = displayLabel;
+                        versionSelect.appendChild(option);
+                    });
+                }
+            }
 
             const editorModal = document.getElementById('resume-editor-modal');
             if (editorModal) {

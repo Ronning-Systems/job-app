@@ -30,6 +30,8 @@ from typing import Optional, List
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
 import httpx
+import asyncio
+import json as _json
 
 from models import (
     init_db,
@@ -413,11 +415,92 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
     return format_job_response(job, application)
 
 
+# In-memory tracking for background resume generation
+_generation_status = {}  # {job_id: {"status": "processing"|"completed"|"error", "error": str, "version": int, "resume_id": int}}
+
+
+def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str):
+    """Run resume generation in a background thread, store result in DB and update status dict."""
+    try:
+        _generation_status[job_id] = {"status": "processing"}
+        # Run the async agent in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            resume_result = loop.run_until_complete(
+                agent_service.generate_resume(
+                    user_profile={},
+                    job_description=job_description,
+                    example_resumes=example_resumes,
+                    template=template,
+                    target_role=target_role,
+                    model_override=model_override,
+                )
+            )
+        finally:
+            loop.close()
+
+        resume_content = resume_result.get("content", _json.dumps(resume_result))
+
+        # Save to DB
+        db = SessionLocal()
+        try:
+            existing_resume = db.query(GeneratedResume).filter(
+                GeneratedResume.job_id == job_id
+            ).first()
+
+            if existing_resume:
+                revisions = existing_resume.revisions or []
+                next_version = len(revisions) + 1
+                revisions.append({
+                    "version": next_version,
+                    "content": resume_content,
+                    "feedback": None,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                existing_resume.current_content = resume_content
+                existing_resume.revisions = revisions
+                existing_resume.updated_at = datetime.utcnow()
+                generated_resume = existing_resume
+            else:
+                generated_resume = GeneratedResume(
+                    job_id=job_id,
+                    user_id=user_id,
+                    current_content=resume_content,
+                    revisions=[{
+                        "version": 1,
+                        "content": resume_content,
+                        "feedback": None,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }],
+                )
+                db.add(generated_resume)
+
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.updated_at = datetime.utcnow()
+
+            db.commit()
+            db.refresh(generated_resume)
+
+            _generation_status[job_id] = {
+                "status": "completed",
+                "resume_id": generated_resume.id,
+                "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"[generate-resume-bg] Error for job {job_id}: {e}", exc_info=True)
+        _generation_status[job_id] = {"status": "error", "error": str(e)}
+
+
 @app.post("/api/jobs/{job_id}/generate-resume")
 async def generate_job_resume(
-    job_id: int, resume_request: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    job_id: int, resume_request: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
-    """Generate a resume for a specific job using example resumes and template"""
+    """Generate a resume for a specific job using example resumes and template.
+    Runs generation in background; client polls /generate-resume/status/{job_id}."""
     job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -491,9 +574,12 @@ async def generate_job_resume(
     model_override = resume_request.get("model")
     logger.info(f"[generate-resume] Model override: {model_override}")
 
-    # Generate resume using agent service
-    resume_result = await agent_service.generate_resume(
-        user_profile={},
+    # Launch background generation
+    _generation_status[job_id] = {"status": "processing"}
+    background_tasks.add_task(
+        _do_generate_resume,
+        job_id=job_id,
+        user_id=current_user.id,
         job_description=job_description,
         example_resumes=example_resumes,
         template=template,
@@ -501,55 +587,40 @@ async def generate_job_resume(
         model_override=model_override,
     )
 
-    # Get the content from the result
-    import json
+    return {"job_id": job_id, "status": "processing"}
 
-    resume_content = resume_result.get("content", json.dumps(resume_result))
 
-    # Save to GeneratedResume table (create or update with revision tracking)
-    existing_resume = db.query(GeneratedResume).filter(
-        GeneratedResume.job_id == job_id
-    ).first()
+@app.get("/api/jobs/{job_id}/generate-resume/status")
+async def get_generate_resume_status(
+    job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    """Poll this endpoint to check background resume generation status."""
+    # Verify job ownership
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    if existing_resume:
-        # Append new revision
-        revisions = existing_resume.revisions or []
-        next_version = len(revisions) + 1
-        revisions.append({
-            "version": next_version,
-            "content": resume_content,
-            "feedback": None,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
-        existing_resume.current_content = resume_content
-        existing_resume.revisions = revisions
-        existing_resume.updated_at = datetime.utcnow()
-        generated_resume = existing_resume
-    else:
-        # Create new resume with first revision
-        generated_resume = GeneratedResume(
-            job_id=job_id,
-            user_id=current_user.id,
-            current_content=resume_content,
-            revisions=[{
-                "version": 1,
-                "content": resume_content,
-                "feedback": None,
-                "timestamp": datetime.utcnow().isoformat(),
-            }],
-        )
-        db.add(generated_resume)
+    status = _generation_status.get(job_id, {"status": "unknown"})
 
-    job.updated_at = datetime.utcnow()
-    db.commit()
+    # If completed, return the full result
+    if status.get("status") == "completed":
+        # Fetch the latest resume from DB
+        latest = db.query(GeneratedResume).filter(
+            GeneratedResume.job_id == job_id
+        ).order_by(GeneratedResume.updated_at.desc()).first()
 
-    return {
-        "job_id": job_id,
-        "resume": resume_content,
-        "resume_id": generated_resume.id,
-        "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
-        "revisions": generated_resume.revisions,
-    }
+        if latest:
+            return {
+                "status": "completed",
+                "job_id": job_id,
+                "resume": latest.current_content,
+                "resume_id": latest.id,
+                "version": len(latest.revisions) if latest.revisions else 1,
+                "revisions": latest.revisions or [],
+            }
+        return {"status": "completed", "job_id": job_id, "resume": None}
+
+    return {"status": status.get("status", "unknown"), "error": status.get("error")}
 
 
 @app.post("/api/jobs/{job_id}/revise-resume")
@@ -705,6 +776,7 @@ def format_job_response(
 
     # Get latest generated resume
     generated_resume = None
+    resume_revisions = []
     if db:
         latest_resume = (
             db.query(GeneratedResume)
@@ -714,6 +786,7 @@ def format_job_response(
         )
         if latest_resume:
             generated_resume = latest_resume.current_content
+            resume_revisions = latest_resume.revisions or []
 
     return {
         "id": job.id,
@@ -737,6 +810,7 @@ def format_job_response(
         "required_credentials": job.required_credentials or [],
         "history": application.history or [],
         "generated_resume": generated_resume,
+        "resume_revisions": resume_revisions,
     }
 
 
