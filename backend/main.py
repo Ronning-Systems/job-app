@@ -488,8 +488,9 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     "timestamp": datetime.utcnow().isoformat(),
                 })
                 existing_resume.current_content = resume_content
-                existing_resume.revisions = revisions
+                existing_resume.revisions = list(revisions)  # new list to trigger SQLAlchemy dirty flag
                 existing_resume.updated_at = datetime.utcnow()
+                db.add(existing_resume)  # force dirty
                 generated_resume = existing_resume
             else:
                 generated_resume = GeneratedResume(
