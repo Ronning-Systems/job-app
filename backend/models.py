@@ -125,8 +125,8 @@ if DATABASE_URL:
     logger.info(f"Using PostgreSQL database from DATABASE_URL")
     engine = create_engine(
         DATABASE_URL,
-        pool_size=2,
-        max_overflow=2,
+        pool_size=5,
+        max_overflow=5,
         pool_pre_ping=True,
         pool_recycle=300,
         connect_args={"connect_timeout": 10},
@@ -144,12 +144,42 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def init_db():
     try:
         Base.metadata.create_all(bind=engine)
+        _run_migrations(engine)
     except Exception as e:
         logger.error(f"Database init failed: {e}")
         if not DATABASE_URL:
             raise  # SQLite should always work
         # For PostgreSQL, log but don't crash — the app can retry on first request
         logger.warning("PostgreSQL connection failed during startup; will retry on first request")
+
+
+def _run_migrations(eng):
+    """Add missing columns to existing tables (create_all only creates missing tables)."""
+    from sqlalchemy import text, inspect
+    inspector = inspect(eng)
+
+    # Check generated_resumes table for missing columns
+    if 'generated_resumes' in inspector.get_table_names():
+        existing_cols = [c['name'] for c in inspector.get_columns('generated_resumes')]
+        with eng.connect() as conn:
+            if 'revisions' not in existing_cols:
+                logger.info("Migrating: adding 'revisions' column to generated_resumes")
+                conn.execute(text(
+                    "ALTER TABLE generated_resumes ADD COLUMN revisions JSON DEFAULT '[]'::json"
+                ))
+                conn.commit()
+            if 'current_content' not in existing_cols:
+                logger.info("Migrating: adding 'current_content' column to generated_resumes")
+                conn.execute(text(
+                    "ALTER TABLE generated_resumes ADD COLUMN current_content TEXT"
+                ))
+                conn.commit()
+            if 'user_id' not in existing_cols:
+                logger.info("Migrating: adding 'user_id' column to generated_resumes")
+                conn.execute(text(
+                    "ALTER TABLE generated_resumes ADD COLUMN user_id INTEGER REFERENCES users(id)"
+                ))
+                conn.commit()
 
 
 def get_db():
