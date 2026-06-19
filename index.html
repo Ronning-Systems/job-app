@@ -2483,7 +2483,7 @@ The AI will automatically extract:
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
-                    link.download = `${fullJob.company.replace(/\s+/g, '_')}_Resume.docx`;
+                    link.download = `${job.company.replace(/\s+/g, '_')}_Resume.docx`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
