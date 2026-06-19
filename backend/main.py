@@ -452,7 +452,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
     """Run resume generation in a background thread, store result in DB and update status dict."""
     try:
         _generation_status[job_id] = {"status": "processing"}
-        # Run the async agent in a new event loop
+        # Run the async agent in a new event loop (NO DB session held during generation)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -471,7 +471,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
 
         resume_content = resume_result.get("content", _json.dumps(resume_result))
 
-        # Save to DB
+        # Now open a DB session ONLY to save the result (short-lived)
         db = SessionLocal()
         try:
             existing_resume = db.query(GeneratedResume).filter(
