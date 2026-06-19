@@ -996,6 +996,25 @@ The AI will automatically extract:
         </div>
     </div>
 
+    <!-- Resume Viewer Modal (for viewing example/template content) -->
+    <div class="modal-overlay" id="resume-viewer-modal" style="z-index: 3000;">
+        <div class="modal" style="max-width: 800px; width: 100%; height: 85vh; max-height: 95vh; display: flex; flex-direction: column; margin: 10px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-alt"></i> <span id="resume-viewer-title">Resume</span></h2>
+                <button class="btn-close" id="btn-close-resume-viewer">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; padding: 0; overflow: hidden;">
+                <div id="resume-viewer-loading" style="display: flex; align-items: center; justify-content: center; height: 100%;">
+                    <p style="color: var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading...</p>
+                </div>
+                <pre id="resume-viewer-content" style="display: none; height: 100%; overflow: auto; padding: 16px; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-close-resume-viewer-footer">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Resume Editor Modal -->
     <div class="modal-overlay" id="resume-editor-modal" style="z-index: 2000;">
         <div class="modal" style="max-width: 900px; width: 100%; height: 90vh; max-height: 95vh; display: flex; flex-direction: column; margin: 10px;">
@@ -1915,6 +1934,19 @@ The AI will automatically extract:
 
         document.getElementById('btn-export-resume').addEventListener('click', exportResumeToDocx);
 
+        // Resume viewer modal close listeners
+        document.getElementById('btn-close-resume-viewer').addEventListener('click', () => {
+            document.getElementById('resume-viewer-modal').classList.remove('active');
+        });
+        document.getElementById('btn-close-resume-viewer-footer').addEventListener('click', () => {
+            document.getElementById('resume-viewer-modal').classList.remove('active');
+        });
+        document.getElementById('resume-viewer-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('resume-viewer-modal')) {
+                document.getElementById('resume-viewer-modal').classList.remove('active');
+            }
+        });
+
         // Version history dropdown — load selected version into editor
         document.getElementById('resume-version-select').addEventListener('change', (e) => {
             const job = jobs.find(j => j.id === currentEditingJobId);
@@ -2140,9 +2172,14 @@ The AI will automatically extract:
                         <i class="fas fa-file" style="color: var(--primary);"></i>
                         <span style="font-size: 0.9rem;">${file.name}</span>
                     </div>
-                    <button onclick="removeExampleResume(${index})" style="background: none; border: none; color: var(--danger); cursor: pointer;">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <div style="display: flex; gap: 4px;">
+                        <button onclick="viewExampleResume(${index})" style="background: none; border: none; color: var(--info); cursor: pointer;" title="View content">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button onclick="removeExampleResume(${index})" style="background: none; border: none; color: var(--danger); cursor: pointer;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
             `).join('');
         }
@@ -2172,6 +2209,49 @@ The AI will automatically extract:
         window.removeExampleResume = function(index) {
             resumeSettings.exampleResumes.splice(index, 1);
             renderExampleResumesList(resumeSettings.exampleResumes);
+        };
+
+        // View example resume content
+        window.viewExampleResume = async function(index) {
+            const file = resumeSettings.exampleResumes[index];
+            if (!file) return;
+
+            const modal = document.getElementById('resume-viewer-modal');
+            const title = document.getElementById('resume-viewer-title');
+            const loading = document.getElementById('resume-viewer-loading');
+            const content = document.getElementById('resume-viewer-content');
+
+            title.textContent = file.name;
+            loading.style.display = 'flex';
+            content.style.display = 'none';
+            modal.classList.add('active');
+
+            try {
+                if (file.id) {
+                    // Fetch from backend with extracted text
+                    const response = await apiFetch(`${API_URL}/resumes/base/${file.id}`);
+                    if (!response.ok) throw new Error('Failed to fetch resume');
+                    const data = await response.json();
+                    content.textContent = data.extracted_text || '(No text could be extracted)';
+                } else if (file.content) {
+                    // Locally uploaded — try to read as text
+                    const dataUrl = file.content;
+                    const b64 = dataUrl.split(',')[1] || dataUrl;
+                    try {
+                        const text = atob(b64);
+                        content.textContent = text;
+                    } catch {
+                        content.textContent = '(Binary content — save settings to view extracted text)';
+                    }
+                } else {
+                    content.textContent = '(No content available)';
+                }
+            } catch (error) {
+                content.textContent = 'Error: ' + error.message;
+            }
+
+            loading.style.display = 'none';
+            content.style.display = 'block';
         };
 
         // Remove template file

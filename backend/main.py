@@ -358,6 +358,35 @@ def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(g
     ]
 
 
+@app.get("/api/resumes/base/{resume_id}")
+def get_base_resume(resume_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get a single base resume with extracted text content"""
+    resume = db.query(BaseResume).filter(
+        BaseResume.id == resume_id,
+        BaseResume.user_id == current_user.id
+    ).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    # Extract text from the stored content
+    extracted_text = ""
+    if resume.content:
+        try:
+            from agents import extract_text_from_file
+            extracted_text = extract_text_from_file(resume.content, resume.name)
+        except Exception as e:
+            logger.error(f"Failed to extract text from resume {resume_id}: {e}")
+            extracted_text = ""
+
+    return {
+        "id": resume.id,
+        "name": resume.name,
+        "resume_type": resume.resume_type,
+        "created_at": resume.created_at.isoformat() if resume.created_at else None,
+        "extracted_text": extracted_text,
+    }
+
+
 @app.delete("/api/resumes/base/{resume_id}")
 def delete_base_resume(resume_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete a base resume"""
