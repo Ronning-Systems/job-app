@@ -2276,9 +2276,20 @@ The AI will automatically extract:
                 return;
             }
 
-            // Get selected model from dropdown (if available — only in editor modal)
+            // Get selected model from dropdown, or fall back to saved preference
             const modelSelect = document.getElementById('resume-model-select');
-            const selectedModel = modelSelect ? modelSelect.value : '';
+            let selectedModel = modelSelect ? modelSelect.value : '';
+            
+            // If no model selected in dropdown, use saved preference from localStorage
+            if (!selectedModel) {
+                const savedModel = localStorage.getItem('lastUsedResumeModel');
+                if (savedModel) selectedModel = savedModel;
+            }
+            
+            // Save this selection for next time
+            if (selectedModel) {
+                localStorage.setItem('lastUsedResumeModel', selectedModel);
+            }
 
             // Show loading overlay
             showLoadingOverlay(selectedModel ? `Generating resume with ${selectedModel}...` : 'Generating resume...');
@@ -2431,6 +2442,12 @@ The AI will automatically extract:
             const editorModal = document.getElementById('resume-editor-modal');
             if (editorModal) {
                 editorModal.classList.add('active');
+                // Set dropdown to saved model preference
+                const modelSelect = document.getElementById('resume-model-select');
+                if (modelSelect) {
+                    const savedModel = localStorage.getItem('lastUsedResumeModel');
+                    if (savedModel) modelSelect.value = savedModel;
+                }
             } else {
                 console.error('resume-editor-modal element not found');
             }
