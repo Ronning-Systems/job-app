@@ -266,6 +266,28 @@ def get_job(job_id: int, db: Session = Depends(get_db), current_user: User = Dep
     return format_job_response(job, application, db)
 
 
+# Debug endpoint to check resume revisions in DB
+@app.get("/api/debug/resume/{job_id}")
+def debug_resume(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Debug: Check what's actually stored in the GeneratedResume table"""
+    resumes = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).all()
+    return {
+        "job_id": job_id,
+        "resume_count": len(resumes),
+        "resumes": [
+            {
+                "id": r.id,
+                "job_id": r.job_id,
+                "current_content_length": len(r.current_content) if r.current_content else 0,
+                "revisions": r.revisions,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in resumes
+        ]
+    }
+
+
 @app.put("/api/jobs/{job_id}", response_model=JobDetailResponse)
 def update_job(job_id: int, update: JobUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Update job details"""
