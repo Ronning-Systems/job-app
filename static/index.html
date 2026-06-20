@@ -2349,9 +2349,20 @@ The AI will automatically extract:
 
                     if (pollResult.status === 'completed') {
                         // Generation finished — load the result
+                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0);
                         job.generated_resume = pollResult.resume;
                         job.resume_revisions = pollResult.revisions || [];
                         await fetchJobs();
+                        
+                        // Refresh the jobs array with the latest data
+                        const updatedJob = jobs.find(j => j.id === jobId);
+                        if (updatedJob) {
+                            // Update the local job reference with fresh data from fetchJobs
+                            job.generated_resume = updatedJob.generated_resume;
+                            job.resume_revisions = updatedJob.resume_revisions || [];
+                            console.log('[generateResume] Updated job from fetchJobs, revisions:', updatedJob.resume_revisions?.length || 0);
+                        }
+                        
                         openResumeEditor(jobId);
                         return;
                     } else if (pollResult.status === 'error') {
@@ -2408,6 +2419,7 @@ The AI will automatically extract:
             if (versionSelect) {
                 versionSelect.innerHTML = '';
                 const revisions = job.resume_revisions || [];
+                console.log('[openResumeEditor] Populating version dropdown with', revisions.length, 'revisions');
                 if (revisions.length === 0) {
                     versionSelect.innerHTML = '<option value="">Current</option>';
                 } else {
@@ -2436,17 +2448,27 @@ The AI will automatically extract:
                         option.textContent = label;
                         versionSelect.appendChild(option);
                     });
+                    console.log('[openResumeEditor] Version dropdown populated with', sorted.length, 'options');
                 }
             }
 
             const editorModal = document.getElementById('resume-editor-modal');
             if (editorModal) {
                 editorModal.classList.add('active');
+                
                 // Set dropdown to saved model preference
                 const modelSelect = document.getElementById('resume-model-select');
                 if (modelSelect) {
                     const savedModel = localStorage.getItem('lastUsedResumeModel');
                     if (savedModel) modelSelect.value = savedModel;
+                }
+                
+                // Auto-select the latest version in the version dropdown
+                const versionSelect = document.getElementById('resume-version-select');
+                if (versionSelect && versionSelect.options.length > 0) {
+                    versionSelect.selectedIndex = 0; // Select first option (latest)
+                    // Trigger change event to load the content
+                    versionSelect.dispatchEvent(new Event('change'));
                 }
             } else {
                 console.error('resume-editor-modal element not found');

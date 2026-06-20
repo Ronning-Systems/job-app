@@ -738,12 +738,14 @@ async def revise_job_resume(
     import json
     resume_content = resume_result.get("content", json.dumps(resume_result))
 
-    # Append new revision
+    # Append new revision with model info
     revisions = existing_resume.revisions or []
     next_version = len(revisions) + 1
+    model_used = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "kimi-k2.5:cloud")
     revisions.append({
         "version": next_version,
         "content": resume_content,
+        "model": model_used,
         "feedback": feedback,
         "timestamp": datetime.utcnow().isoformat(),
     })

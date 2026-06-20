@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod *)",
+      "Bash(gcloud *)",
+      "Bash(docker build *)",
+      "Bash(docker push *)",
+      "Bash(bash *)"
+    ]
+  },
+  "$version": 4
+}

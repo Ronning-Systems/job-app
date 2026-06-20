@@ -163,28 +163,27 @@ class JobParser:
     async def parse_from_text(self, text: str, url: Optional[str] = None) -> Dict[str, Any]:
         """Parse job details from plain text using Ollama"""
 
-        # Try Ollama parsing
-        print(f"[JobParser] Attempting Ollama parsing...")
+        # Use Ollama parsing
+        print(f"[JobParser] Parsing with Ollama...")
         ollama_result = await self.ollama.parse_job_description(text)
 
-        if ollama_result and ollama_result.get("company"):
-            result = {
-                "company": ollama_result.get("company", "Unknown"),
-                "position": ollama_result.get("position", "Unknown"),
-                "location": ollama_result.get("location"),
-                "salary": ollama_result.get("salary"),
-                "remote": ollama_result.get("remote", "Not specified"),
-                "url": url,
-                "raw_text": text,
-                "description": ollama_result.get("description", text[:2000]),
-                "requirements": ollama_result.get("requirements", {"must_have": [], "nice_to_have": []}),
-                "responsibilities": ollama_result.get("responsibilities", []),
-                "keywords": ollama_result.get("keywords", []),
-                "credentials": ollama_result.get("credentials", [])
-            }
-            return result
-        else:
+        if not ollama_result or not ollama_result.get("company"):
             raise Exception("Ollama returned empty result")
+
+        return {
+            "company": ollama_result.get("company", "Unknown"),
+            "position": ollama_result.get("position", "Unknown"),
+            "location": ollama_result.get("location"),
+            "salary": ollama_result.get("salary"),
+            "remote": ollama_result.get("remote", "Not specified"),
+            "url": url,
+            "raw_text": text,
+            "description": ollama_result.get("description", text[:2000]),
+            "requirements": ollama_result.get("requirements", {"must_have": [], "nice_to_have": []}),
+            "responsibilities": ollama_result.get("responsibilities", []),
+            "keywords": ollama_result.get("keywords", []),
+            "credentials": ollama_result.get("credentials", [])
+        }
 
     def _detect_job_board(self, url: str, html_content: str) -> str:
         """Detect which job board the URL is from"""
