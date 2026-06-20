@@ -2400,16 +2400,29 @@ The AI will automatically extract:
                 if (revisions.length === 0) {
                     versionSelect.innerHTML = '<option value="">Current</option>';
                 } else {
+                    // Model name -> human-readable label
+                    const modelLabels = {
+                        'qwen3.5:cloud': 'Qwen 3.5',
+                        'minimax-m3:cloud': 'MiniMax M3',
+                        'minimax-m2.5:cloud': 'MiniMax M2.5',
+                        'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
+                        'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
+                        'gemma4:31b-cloud': 'Gemma 4 31B',
+                        'glm-5.1:cloud': 'GLM 5.1',
+                        'deepseek-v4-flash:cloud': 'DeepSeek V4 Flash',
+                        'gpt-oss:20b-cloud': 'GPT-OSS 20B',
+                        'gpt-oss:120b-cloud': 'GPT-OSS 120B',
+                    };
                     // Show revisions newest-first
                     const sorted = [...revisions].reverse();
                     sorted.forEach((rev, idx) => {
                         const isLatest = (idx === 0);
-                        const ts = rev.timestamp ? new Date(rev.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
-                        const label = isLatest ? `v${rev.version} (current)` : `v${rev.version}`;
-                        const displayLabel = ts ? `${label} — ${ts}` : label;
+                        const modelLabel = modelLabels[rev.model] || rev.model || 'Unknown';
+                        let label = `v${rev.version}-${modelLabel}`;
+                        if (isLatest) label += ' (current)';
                         const option = document.createElement('option');
                         option.value = rev.version;
-                        option.textContent = displayLabel;
+                        option.textContent = label;
                         versionSelect.appendChild(option);
                     });
                 }

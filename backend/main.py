@@ -482,9 +482,11 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             if existing_resume:
                 revisions = existing_resume.revisions or []
                 next_version = len(revisions) + 1
+                model_label = model_override or "qwen3.5:cloud"
                 revisions.append({
                     "version": next_version,
                     "content": resume_content,
+                    "model": model_label,
                     "feedback": None,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
@@ -501,6 +503,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     revisions=[{
                         "version": 1,
                         "content": resume_content,
+                        "model": model_override or "qwen3.5:cloud",
                         "feedback": None,
                         "timestamp": datetime.utcnow().isoformat(),
                     }],
