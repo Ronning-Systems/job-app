@@ -483,6 +483,9 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 revisions = existing_resume.revisions or []
                 next_version = len(revisions) + 1
                 model_label = model_override or "qwen3.5:cloud"
+                
+                logger.info(f"[generate-resume-bg] Regenerating job {job_id}, existing revisions: {len(revisions)}, next version: {next_version}")
+                
                 revisions.append({
                     "version": next_version,
                     "content": resume_content,
@@ -495,6 +498,8 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 existing_resume.updated_at = datetime.utcnow()
                 db.add(existing_resume)  # force dirty
                 generated_resume = existing_resume
+                
+                logger.info(f"[generate-resume-bg] Appended revision v{next_version} with model {model_label}, total revisions now: {len(revisions)}")
             else:
                 generated_resume = GeneratedResume(
                     job_id=job_id,
