@@ -127,8 +127,12 @@ class GeneratedResume(Base):
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    current_content = Column(Text)  # Latest version of the resume
+    current_content = Column(Text)  # Latest version of the resume (plain text fallback)
     revisions = Column(JSON, default=list)  # List of {version, content, feedback, timestamp}
+    # Template-driven structured output (one row = latest). Each revision may
+    # also carry its own structured_content + atoms_used in the JSON list above.
+    structured_content = Column(JSON, nullable=True)
+    atoms_snapshot = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -197,6 +201,18 @@ def _run_migrations(eng):
                 logger.info("Migrating: adding 'user_id' column to generated_resumes")
                 conn.execute(text(
                     "ALTER TABLE generated_resumes ADD COLUMN user_id INTEGER REFERENCES users(id)"
+                ))
+                conn.commit()
+            if 'structured_content' not in existing_cols:
+                logger.info("Migrating: adding 'structured_content' column to generated_resumes")
+                conn.execute(text(
+                    "ALTER TABLE generated_resumes ADD COLUMN structured_content JSON"
+                ))
+                conn.commit()
+            if 'atoms_snapshot' not in existing_cols:
+                logger.info("Migrating: adding 'atoms_snapshot' column to generated_resumes")
+                conn.execute(text(
+                    "ALTER TABLE generated_resumes ADD COLUMN atoms_snapshot JSON"
                 ))
                 conn.commit()
 

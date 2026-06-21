@@ -599,7 +599,7 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
 _generation_status = {}  # {job_id: {"status": "processing"|"completed"|"error", "error": str, "version": int, "resume_id": int}}
 
 
-def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str):
+def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str, atoms: Optional[list] = None):
     """Run resume generation in a background thread, store result in DB and update status dict."""
     from sqlalchemy.orm.attributes import flag_modified
     try:
@@ -616,12 +616,14 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     template=template,
                     target_role=target_role,
                     model_override=model_override,
+                    atoms=atoms,
                 )
             )
         finally:
             loop.close()
 
         resume_content = resume_result.get("content", _json.dumps(resume_result))
+        structured_content = resume_result.get("structured_content")  # may be None
 
         # Now open a DB session ONLY to save the result (short-lived)
         db = SessionLocal()
@@ -648,19 +650,28 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     f"[generate-resume-bg] Regenerating job {job_id}, existing revisions: {len(revisions)}, next version: {next_version}"
                 )
 
-                revisions.append({
+                new_revision = {
                     "version": next_version,
                     "content": resume_content,
                     "model": model_label,
                     "feedback": None,
                     "timestamp": datetime.utcnow().isoformat(),
-                })
+                }
+                if structured_content is not None:
+                    new_revision["structured_content"] = structured_content
+                if atoms is not None:
+                    new_revision["atoms_used"] = [a.get("id") for a in atoms]
+                revisions.append(new_revision)
 
                 # Assign a brand-new list (not the same reference we appended to) so SQLAlchemy
                 # is guaranteed to see the change. flag_modified is the belt-and-suspenders for
                 # JSON columns on backends where in-place mutation may not trigger a write.
                 existing_resume.current_content = resume_content
                 existing_resume.revisions = list(revisions)
+                if structured_content is not None:
+                    existing_resume.structured_content = structured_content
+                if atoms is not None:
+                    existing_resume.atoms_snapshot = [a.get("id") for a in atoms]
                 flag_modified(existing_resume, "revisions")
                 existing_resume.updated_at = datetime.utcnow()
                 generated_resume = existing_resume
@@ -669,18 +680,27 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     f"[generate-resume-bg] Appended revision v{next_version} with model {model_label}, total revisions now: {len(revisions)}"
                 )
             else:
+                initial_revision = {
+                    "version": 1,
+                    "content": resume_content,
+                    "model": model_label,
+                    "feedback": None,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                if structured_content is not None:
+                    initial_revision["structured_content"] = structured_content
+                if atoms is not None:
+                    initial_revision["atoms_used"] = [a.get("id") for a in atoms]
                 generated_resume = GeneratedResume(
                     job_id=job_id,
                     user_id=user_id,
                     current_content=resume_content,
-                    revisions=[{
-                        "version": 1,
-                        "content": resume_content,
-                        "model": model_label,
-                        "feedback": None,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }],
+                    revisions=[initial_revision],
                 )
+                if structured_content is not None:
+                    generated_resume.structured_content = structured_content
+                if atoms is not None:
+                    generated_resume.atoms_snapshot = [a.get("id") for a in atoms]
                 db.add(generated_resume)
 
             job = db.query(Job).filter(Job.id == job_id).first()
@@ -694,6 +714,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 "status": "completed",
                 "resume_id": generated_resume.id,
                 "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
+                "mode": resume_result.get("mode", "plain"),
             }
         finally:
             db.close()
@@ -781,6 +802,19 @@ async def generate_job_resume(
     model_override = resume_request.get("model")
     logger.info(f"[generate-resume] Model override: {model_override}")
 
+    # Load the user's saved template atoms (if any). When present, the LLM
+    # emits structured JSON; otherwise we fall back to plain-text mode.
+    tmpl_row = db.query(BaseResume).filter(
+        BaseResume.resume_type == "template",
+        BaseResume.user_id == current_user.id,
+    ).first()
+    atoms = None
+    if tmpl_row and tmpl_row.atoms_json:
+        atoms = tmpl_row.atoms_json
+        logger.info(
+            f"[generate-resume] Template atoms loaded: {[a.get('id') for a in atoms]}"
+        )
+
     # Launch background generation
     _generation_status[job_id] = {"status": "processing"}
     background_tasks.add_task(
@@ -792,6 +826,7 @@ async def generate_job_resume(
         template=template,
         target_role=job.position,
         model_override=model_override,
+        atoms=atoms,
     )
 
     return {"job_id": job_id, "status": "processing"}
@@ -824,6 +859,9 @@ async def get_generate_resume_status(
                 "resume_id": latest.id,
                 "version": len(latest.revisions) if latest.revisions else 1,
                 "revisions": latest.revisions or [],
+                "structured_content": latest.structured_content,
+                "atoms_snapshot": latest.atoms_snapshot,
+                "mode": status.get("mode", "plain"),
             }
         return {"status": "completed", "job_id": job_id, "resume": None}
 
@@ -872,6 +910,11 @@ async def revise_job_resume(
         template = {"name": template_db.name, "content": template_db.content} if template_db else None
 
     # Generate revised resume using agent service
+    tmpl_row = db.query(BaseResume).filter(
+        BaseResume.resume_type == "template",
+        BaseResume.user_id == current_user.id,
+    ).first()
+    atoms_for_revise = tmpl_row.atoms_json if (tmpl_row and tmpl_row.atoms_json) else None
     resume_result = await agent_service.revise_resume(
         current_resume=existing_resume.current_content,
         feedback=feedback,
@@ -879,6 +922,8 @@ async def revise_job_resume(
         example_resumes=example_resumes,
         template=template,
         target_role=job.position,
+        atoms=atoms_for_revise,
+        current_structured=existing_resume.structured_content,
     )
 
     import json
@@ -894,15 +939,23 @@ async def revise_job_resume(
                 max_version = r["version"]
     next_version = max_version + 1 if max_version else len(revisions) + 1
     model_used = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "kimi-k2.5:cloud")
-    revisions.append({
+    new_revision = {
         "version": next_version,
         "content": resume_content,
         "model": model_used,
         "feedback": feedback,
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }
+    revised_structured = resume_result.get("structured_content")
+    if revised_structured is not None:
+        new_revision["structured_content"] = revised_structured
+    if atoms_for_revise is not None:
+        new_revision["atoms_used"] = [a.get("id") for a in atoms_for_revise]
+    revisions.append(new_revision)
     existing_resume.current_content = resume_content
     existing_resume.revisions = list(revisions)
+    if revised_structured is not None:
+        existing_resume.structured_content = revised_structured
     flag_modified(existing_resume, "revisions")
     existing_resume.updated_at = datetime.utcnow()
     job.updated_at = datetime.utcnow()
@@ -914,6 +967,8 @@ async def revise_job_resume(
         "resume_id": existing_resume.id,
         "version": next_version,
         "revisions": revisions,
+        "structured_content": revised_structured,
+        "mode": resume_result.get("mode", "plain"),
     }
 
 
@@ -1039,6 +1094,8 @@ def format_job_response(
         "history": application.history or [],
         "generated_resume": generated_resume,
         "resume_revisions": resume_revisions,
+        "structured_content": latest_resume.structured_content if latest_resume else None,
+        "atoms_snapshot": latest_resume.atoms_snapshot if latest_resume else None,
     }
 
 
