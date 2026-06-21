@@ -2488,17 +2488,18 @@ The AI will automatically extract:
                 return;
             }
 
-            // Get selected model from dropdown, or fall back to saved preference
+            // Get selected model from dropdown. The dropdown's first option has
+            // value="" which means "Default" (server uses the configured
+            // MODEL_GENERATION). An explicit value means "use this model".
+            // We only fall back to localStorage when the dropdown isn't
+            // mounted yet (a defensive case).
             const modelSelect = document.getElementById('resume-model-select');
-            let selectedModel = modelSelect ? modelSelect.value : '';
-            
-            // If no model selected in dropdown, use saved preference from localStorage
-            if (!selectedModel) {
-                const savedModel = localStorage.getItem('lastUsedResumeModel');
-                if (savedModel) selectedModel = savedModel;
+            let selectedModel = modelSelect ? modelSelect.value : null;
+            if (selectedModel === null) {
+                selectedModel = localStorage.getItem('lastUsedResumeModel') || '';
             }
-            
-            // Save this selection for next time
+            // Remember explicit selections for next time the modal opens,
+            // but don't persist "" because that would override a real choice.
             if (selectedModel) {
                 localStorage.setItem('lastUsedResumeModel', selectedModel);
             }
@@ -2536,6 +2537,9 @@ The AI will automatically extract:
                     job.resume_revisions = result.revisions || [];
                     job.structured_content = result.structured_content || null;
                     job.atoms_snapshot = result.atoms_snapshot || null;
+                    if (result.structured_empty_ratio && result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
+                        alert('Heads up: the model returned valid JSON but most fields are empty. Try Qwen 3.5 or click Regenerate again.');
+                    }
                     await fetchJobs();
                     openResumeEditor(jobId);
                     return;
@@ -2566,11 +2570,17 @@ The AI will automatically extract:
                         // polling response FIRST so they're available even if
                         // fetchJobs fails. fetchJobs will overwrite with the
                         // canonical state right after.
-                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0, 'mode:', pollResult.mode);
+                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0, 'mode:', pollResult.mode, 'emptyRatio:', pollResult.structured_empty_ratio);
                         job.generated_resume = pollResult.resume;
                         job.resume_revisions = pollResult.revisions || [];
                         job.structured_content = pollResult.structured_content || null;
                         job.atoms_snapshot = pollResult.atoms_snapshot || null;
+
+                        // Warn the user if the LLM produced mostly-empty
+                        // structured content (small/cheap models do this).
+                        if (pollResult.structured_empty_ratio >= 0.7 && pollResult.mode !== 'plain') {
+                            alert('Heads up: the model returned valid JSON but most fields are empty. Try Qwen 3.5 or click Regenerate again.');
+                        }
 
                         await fetchJobs();
 
@@ -2644,6 +2654,24 @@ The AI will automatically extract:
             }).join('\n');
         }
 
+        // Returns 0.0–1.0 = fraction of atoms whose text content is empty.
+        // Used to detect LLM outputs that produced valid JSON structure but
+        // blank strings (a common failure mode for small/cheap models).
+        function _measureStructuredEmptyRatio(atoms) {
+            if (!Array.isArray(atoms) || atoms.length === 0) return 0;
+            let empty = 0;
+            for (const a of atoms) {
+                let hasContent = false;
+                if (Array.isArray(a.segments) && a.segments.length > 0) {
+                    hasContent = a.segments.some(s => (s.text || '').trim().length > 0);
+                } else if (typeof a.text === 'string') {
+                    hasContent = a.text.trim().length > 0;
+                }
+                if (!hasContent) empty += 1;
+            }
+            return empty / atoms.length;
+        }
+
         // Render the structured content into per-atom editable cards.
         function renderStructuredEditor(sc) {
             const container = document.getElementById('resume-editor-structured');
@@ -2677,7 +2705,24 @@ The AI will automatically extract:
             // Group atoms by type for clearer editing.
             const sections = _groupStructuredForEditing(sc.atoms);
 
-            let html = '';
+            // Detect a "mostly empty" result — happens when the LLM emits
+            // valid JSON structure but with empty text/segments (smaller /
+            // cheaper models sometimes do this). Warn the user so they know
+            // to switch models or click Regenerate again.
+            const emptyRatio = _measureStructuredEmptyRatio(sc.atoms);
+            let warningBanner = '';
+            if (emptyRatio >= 0.7) {
+                warningBanner = `
+                    <div style="margin-bottom: 14px; padding: 10px 14px; background: #fff3cd; border: 1px solid #ffeaa7; border-left: 3px solid #f39c12; border-radius: 6px; color: #856404;">
+                        <strong><i class="fas fa-exclamation-triangle"></i> Most fields are empty.</strong>
+                        <div style="font-size: 0.85rem; margin-top: 4px;">
+                            The model returned valid JSON but with blank text. Try a different model (Qwen 3.5 is the most reliable for structured output) or click Regenerate again.
+                        </div>
+                    </div>
+                `;
+            }
+
+            let html = warningBanner;
             for (const section of sections) {
                 html += `<div style="margin-bottom: 18px; padding: 12px; background: var(--gray-50); border-radius: 8px; border: 1px solid var(--gray-200);">`;
                 html += `<div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 8px; font-weight: 600;">${section.label}</div>`;

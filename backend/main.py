@@ -765,11 +765,36 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             db.commit()
             db.refresh(generated_resume)
 
+            # Quality flag: if structured_content is mostly empty, the LLM
+            # probably produced valid JSON but with blank fields (common with
+            # small/cheap models). Surface that to the frontend so it can
+            # warn the user to switch models.
+            empty_ratio = 0.0
+            if structured_content is not None and isinstance(structured_content, dict):
+                atoms_list = structured_content.get("atoms") or []
+                if atoms_list:
+                    empty = 0
+                    for a in atoms_list:
+                        if not isinstance(a, dict):
+                            continue
+                        has_content = False
+                        if isinstance(a.get("text"), str) and a["text"].strip():
+                            has_content = True
+                        if not has_content and isinstance(a.get("segments"), list):
+                            has_content = any(
+                                isinstance(s, dict) and (s.get("text") or "").strip()
+                                for s in a["segments"]
+                            )
+                        if not has_content:
+                            empty += 1
+                    empty_ratio = empty / len(atoms_list)
+
             _generation_status[job_id] = {
                 "status": "completed",
                 "resume_id": generated_resume.id,
                 "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
                 "mode": resume_result.get("mode", "plain"),
+                "structured_empty_ratio": round(empty_ratio, 3),
             }
         finally:
             db.close()
@@ -917,6 +942,7 @@ async def get_generate_resume_status(
                 "structured_content": latest.structured_content,
                 "atoms_snapshot": latest.atoms_snapshot,
                 "mode": status.get("mode", "plain"),
+                "structured_empty_ratio": status.get("structured_empty_ratio", 0.0),
             }
         return {"status": "completed", "job_id": job_id, "resume": None}
 
