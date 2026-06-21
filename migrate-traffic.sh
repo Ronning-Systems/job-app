@@ -18,9 +18,9 @@ echo ""
 
 # Show current traffic split
 echo "Current traffic distribution:"
-gcloud run services describe-traffic "${SERVICE_NAME}" \
+gcloud run services describe "${SERVICE_NAME}" \
   --region "${REGION}" \
-  --format="table(traffic.revisions,traffic.percent)"
+  --format="table(status.traffic[].map().basion(),status.traffic[].map().percent())"
 
 echo ""
 echo "Migrating 100% traffic to latest revision..."
