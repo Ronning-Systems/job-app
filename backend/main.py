@@ -482,6 +482,61 @@ def compose_docx_endpoint(
     }
 
 
+class StructuredEditRequest(BaseModel):
+    structured_content: Dict[str, Any]
+    current_content: Optional[str] = None
+
+
+@app.put("/api/resumes/structured/{job_id}")
+def update_structured_resume(
+    job_id: int,
+    request: StructuredEditRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Persist manual edits to the latest revision's structured content.
+
+    Updates the latest GeneratedResume's structured_content + current_content
+    fields. Does NOT create a new revision (the user is editing, not
+    regenerating). The next regenerate will overwrite.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    resume = db.query(GeneratedResume).filter(
+        GeneratedResume.job_id == job_id
+    ).order_by(GeneratedResume.updated_at.desc()).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="No generated resume to edit")
+
+    resume.structured_content = request.structured_content
+    if request.current_content is not None:
+        resume.current_content = request.current_content
+    resume.updated_at = datetime.utcnow()
+    # Also update the latest revision in the JSON list to keep them in sync
+    if resume.revisions:
+        revs = list(resume.revisions or [])
+        if revs:
+            revs[-1]["structured_content"] = request.structured_content
+            if request.current_content is not None:
+                revs[-1]["content"] = request.current_content
+            revs[-1]["edited_at"] = datetime.utcnow().isoformat()
+            resume.revisions = list(revs)
+            flag_modified(resume, "revisions")
+
+    db.commit()
+    db.refresh(resume)
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "resume_id": resume.id,
+    }
+
+
 @app.get("/api/resumes/base")
 def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List all base resumes for the current user, optionally filtered by type"""
