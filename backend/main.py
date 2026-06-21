@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
 import httpx
@@ -120,6 +120,8 @@ class BaseResumeCreate(BaseModel):
     name: str
     resume_type: str  # 'example' or 'template'
     content: str  # Base64 encoded file content
+    atoms: Optional[list] = None  # only for template type
+    docx_base64: Optional[str] = None  # only for template type
 
 
 class JobResponse(BaseModel):
@@ -341,9 +343,19 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user: User = 
 @app.post("/api/resumes/base")
 def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Create or update a base resume (example or template)"""
-    # For template type, delete any existing template for this user first
+    # For template type, delete any existing template for this user first.
+    # This enforces the "single template per user, replacement overwrites"
+    # behavior — the frontend must confirm with the user before calling.
+    replaced_existing = False
     if resume.resume_type == "template":
-        db.query(BaseResume).filter(BaseResume.resume_type == "template", BaseResume.user_id == current_user.id).delete()
+        existing = db.query(BaseResume).filter(
+            BaseResume.resume_type == "template",
+            BaseResume.user_id == current_user.id,
+        ).first()
+        if existing is not None:
+            replaced_existing = True
+            db.delete(existing)
+            db.flush()
 
     # Create new resume record
     base_resume = BaseResume(
@@ -353,15 +365,120 @@ def create_base_resume(resume: BaseResumeCreate, db: Session = Depends(get_db), 
         source="upload",
         user_id=current_user.id,
     )
+    if resume.resume_type == "template":
+        # Persist the parsed atoms + raw DOCX so the composer can reproduce
+        # the template's exact styling later.
+        if resume.atoms is not None:
+            base_resume.atoms_json = resume.atoms
+        if resume.docx_base64 is not None:
+            base_resume.docx_base64 = resume.docx_base64
     db.add(base_resume)
     db.commit()
     db.refresh(base_resume)
 
+    msg = f"{resume.resume_type.capitalize()} resume saved successfully"
+    if replaced_existing:
+        msg = "Existing template replaced. " + msg
     return {
         "id": base_resume.id,
         "name": base_resume.name,
         "resume_type": base_resume.resume_type,
-        "message": f"{resume.resume_type.capitalize()} resume saved successfully",
+        "replaced_existing": replaced_existing,
+        "atoms_count": len(resume.atoms) if resume.atoms else 0,
+        "message": msg,
+    }
+
+
+@app.post("/api/template/parse")
+def parse_template_endpoint(request: dict, current_user: User = Depends(get_current_user)):
+    """Parse a template DOCX (without saving) and return its atoms + a preview.
+
+    The frontend calls this when the user uploads a new template, to:
+      1) Show the user the detected atoms / structure BEFORE they confirm
+         replacing their current template.
+      2) Get the docx_base64 back so it can pass it to /api/resumes/base.
+    """
+    from template_engine import parse_template_from_b64
+    content_b64 = request.get("content_b64", "")
+    if not content_b64:
+        raise HTTPException(status_code=400, detail="content_b64 is required")
+    try:
+        result = parse_template_from_b64(content_b64)
+    except Exception as e:
+        logger.error(f"Template parse failed: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Failed to parse DOCX: {e}")
+
+    # Return everything except the raw docx bytes (frontend already has them);
+    # include docx_base64 so the frontend can pass it straight to the save call.
+    return {
+        "atoms": result["atoms"],
+        "docx_base64": result["docx_base64"],
+        "page_setup": result["page_setup"],
+        "canonical_atoms_present": result["canonical_atoms_present"],
+        "warnings": result["warnings"],
+    }
+
+
+@app.get("/api/template")
+def get_current_template(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Return the current template's atoms (and its raw DOCX) so the frontend
+    can re-render the structured editor after page reloads."""
+    tmpl = db.query(BaseResume).filter(
+        BaseResume.resume_type == "template",
+        BaseResume.user_id == current_user.id,
+    ).first()
+    if not tmpl:
+        return {"has_template": False}
+    return {
+        "has_template": True,
+        "id": tmpl.id,
+        "name": tmpl.name,
+        "atoms": tmpl.atoms_json or [],
+        "docx_base64": tmpl.docx_base64,
+    }
+
+
+class ComposeDocxRequest(BaseModel):
+    structured_content: Dict[str, Any]
+    template_id: Optional[int] = None  # not strictly needed — we use the
+    # single per-user template — but allows future multi-template support
+
+
+@app.post("/api/resumes/compose-docx")
+def compose_docx_endpoint(
+    request: ComposeDocxRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Compose a DOCX from a structured content tree using the user's template.
+
+    Returns the DOCX bytes as a base64-encoded string along with a filename
+    suggestion. Frontend decodes + triggers a download.
+    """
+    from template_engine import compose_docx as te_compose_docx
+
+    tmpl = db.query(BaseResume).filter(
+        BaseResume.resume_type == "template",
+        BaseResume.user_id == current_user.id,
+    ).first()
+    if not tmpl or not tmpl.docx_base64 or not tmpl.atoms_json:
+        raise HTTPException(
+            status_code=400,
+            detail="No template configured. Upload a template in Resume Settings first.",
+        )
+
+    import base64 as _b64
+    template_bytes = _b64.b64decode(tmpl.docx_base64)
+    try:
+        out_bytes = te_compose_docx(template_bytes, tmpl.atoms_json, request.structured_content)
+    except Exception as e:
+        logger.error(f"compose_docx failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to compose DOCX: {e}")
+
+    return {
+        "docx_base64": _b64.b64encode(out_bytes).decode("ascii"),
+        "filename_suggestion": "resume.docx",
+        "size_bytes": len(out_bytes),
     }
 
 
@@ -373,15 +490,19 @@ def list_base_resumes(resume_type: Optional[str] = None, db: Session = Depends(g
         query = query.filter(BaseResume.resume_type == resume_type)
 
     resumes = query.all()
-    return [
-        {
+    out = []
+    for r in resumes:
+        item = {
             "id": r.id,
             "name": r.name,
             "resume_type": r.resume_type,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
-        for r in resumes
-    ]
+        if r.resume_type == "template":
+            item["atoms_count"] = len(r.atoms_json) if r.atoms_json else 0
+            item["has_docx"] = bool(r.docx_base64)
+        out.append(item)
+    return out
 
 
 @app.get("/api/resumes/base/{resume_id}")
@@ -404,13 +525,17 @@ def get_base_resume(resume_id: int, db: Session = Depends(get_db), current_user:
             logger.error(f"Failed to extract text from resume {resume_id}: {e}")
             extracted_text = ""
 
-    return {
+    response = {
         "id": resume.id,
         "name": resume.name,
         "resume_type": resume.resume_type,
         "created_at": resume.created_at.isoformat() if resume.created_at else None,
         "extracted_text": extracted_text,
     }
+    if resume.resume_type == "template":
+        response["atoms"] = resume.atoms_json or []
+        response["has_docx"] = bool(resume.docx_base64)
+    return response
 
 
 @app.delete("/api/resumes/base/{resume_id}")

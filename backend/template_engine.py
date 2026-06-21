@@ -645,9 +645,14 @@ def parse_template(docx_bytes: bytes) -> Dict[str, Any]:
         atoms_out.append(atom.to_dict())
         seen_ids.add(variant["atom_id"])
 
-    # 3) Synthesize any canonical atom that wasn't seen at all
+    # 3) Synthesize any canonical atom that wasn't seen at all. Skip 'bullet'
+    #    because if we have *any* bullet variant we already cover the role —
+    #    a generic 'bullet' fallback would just be redundant.
     for atom_id in CANONICAL_ATOMS:
         if atom_id not in seen_ids:
+            if atom_id == "bullet" and any(a.startswith("bullet.") for a in seen_ids):
+                # Skip — we already have at least one specific bullet variant.
+                continue
             fallback_atom = _synthesize_missing_atom(doc, atom_id)
             if fallback_atom:
                 atoms_out.append(fallback_atom.to_dict())

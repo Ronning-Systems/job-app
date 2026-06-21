@@ -112,6 +112,13 @@ class BaseResume(Base):
     user = relationship("User", back_populates="base_resumes")
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Template-only fields (nullable; populated when resume_type='template').
+    # atoms_json: list of style atoms (from backend/template_engine.py).
+    # docx_base64: original DOCX bytes so the composer can reuse the
+    # template's styles.xml/numbering.xml/theme1.xml exactly.
+    atoms_json = Column(JSON, nullable=True)
+    docx_base64 = Column(Text, nullable=True)
+
 
 class GeneratedResume(Base):
     """Generated resume with revision history, linked to a job"""
@@ -230,6 +237,20 @@ def _run_migrations(eng):
                 conn.commit()
             except Exception as e:
                 logger.debug(f"Unique index on public_job_id may already exist: {e}")
+
+    # Check base_resumes table for missing columns (template fields)
+    if 'base_resumes' in inspector.get_table_names():
+        existing_cols = [c['name'] for c in inspector.get_columns('base_resumes')]
+        with eng.connect() as conn:
+            if 'atoms_json' not in existing_cols:
+                logger.info("Migrating: adding 'atoms_json' column to base_resumes")
+                # JSON column — PostgreSQL native, SQLite stores as TEXT.
+                conn.execute(text("ALTER TABLE base_resumes ADD COLUMN atoms_json JSON"))
+                conn.commit()
+            if 'docx_base64' not in existing_cols:
+                logger.info("Migrating: adding 'docx_base64' column to base_resumes")
+                conn.execute(text("ALTER TABLE base_resumes ADD COLUMN docx_base64 TEXT"))
+                conn.commit()
 
 
 def get_db():
