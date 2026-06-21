@@ -65,7 +65,16 @@ PREVIOUS_REVISION=$(gcloud run revisions list \
   --sort-by="-metadata.creationTimestamp" \
   --limit=1 2>/dev/null || echo "none")
 
-# Step 2: Build Docker image locally (amd64 for Cloud Run)
+# Step 2: Ensure Docker is configured to authenticate to the registry.
+# `gcr.io` is a legacy hostname that Google now maps to Artifact Registry.
+# Without this, `docker push` will fail with an "Unauthenticated request"
+# error even when the user has Owner-level IAM on the project.
+log_info "Configuring Docker auth for ${IMAGE_NAME%/*}..."
+gcloud auth configure-docker "${IMAGE_NAME%/*}" --quiet || {
+    log_warn "gcloud auth configure-docker failed; push may still fail"
+}
+
+# Step 3: Build Docker image locally (amd64 for Cloud Run)
 log_info "Building Docker image (linux/amd64)..."
 docker build --platform linux/amd64 -t "${IMAGE_NAME}" .
 
@@ -76,7 +85,7 @@ fi
 
 log_info "Docker image built successfully"
 
-# Step 3: Push to Container Registry
+# Step 4: Push to Container Registry
 log_info "Pushing image to Container Registry..."
 docker push "${IMAGE_NAME}"
 
@@ -87,7 +96,7 @@ fi
 
 log_info "Image pushed successfully"
 
-# Step 4: Deploy to Cloud Run
+# Step 5: Deploy to Cloud Run
 log_info "Deploying to Cloud Run..."
 
 gcloud run deploy "${SERVICE_NAME}" \
@@ -107,7 +116,7 @@ fi
 
 log_info "New revision deployed (traffic not yet migrated)"
 
-# Step 5: Get revision name
+# Step 6: Get revision name
 REVISION=$(gcloud run revisions list \
   --service "${SERVICE_NAME}" \
   --region "${REGION}" \
@@ -117,7 +126,7 @@ REVISION=$(gcloud run revisions list \
 
 log_info "New revision: ${REVISION}"
 
-# Step 6: Migrate traffic to new revision
+# Step 7: Migrate traffic to new revision
 echo ""
 log_info "Migrating traffic to new revision..."
 gcloud run services update-traffic "${SERVICE_NAME}" \
@@ -131,12 +140,12 @@ fi
 
 log_info "Traffic migrated successfully"
 
-# Step 7: Get service URL
+# Step 8: Get service URL
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
   --region "${REGION}" \
   --format="value(status.url)")
 
-# Step 8: Print summary
+# Step 9: Print summary
 echo ""
 echo "=========================================================================="
 echo "Deployment complete!"
