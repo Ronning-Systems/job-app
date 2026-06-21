@@ -1029,6 +1029,8 @@ The AI will automatically extract:
                         <span id="resume-editor-job-title" style="color: var(--primary); font-weight: 600;"></span>
                         <span style="color: var(--gray-400);">|</span>
                         <span id="resume-editor-company" style="color: var(--gray-600);"></span>
+                        <span style="color: var(--gray-400);">|</span>
+                        <span id="resume-editor-public-job-id" style="color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 2px 6px; background: var(--gray-100); border-radius: 4px; display: none;" title="Globally unique Job ID"></span>
                     </div>
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-microchip"></i> Model:</span>
@@ -1412,13 +1414,14 @@ The AI will automatically extract:
             const statusClass = statusClasses[job.stage] || 'status-applied';
             const isArchived = ['rejected', 'withdrawn', 'closed'].includes(job.stage);
             const hasGeneratedResume = job.generated_resume && (typeof job.generated_resume === 'string' ? job.generated_resume.trim() : (job.generated_resume.content && job.generated_resume.content.trim()));
+            const publicJobId = job.public_job_id || '';
             console.log('Rendering job:', job.id, 'generated_resume:', hasGeneratedResume, job.generated_resume ? 'exists' : 'null');
             return `
                 <div class="job-item ${isArchived ? 'archived' : ''}" data-id="${job.id}">
                     <div class="job-main">
                         <div>
                             <div class="job-title">${job.position}</div>
-                            <div class="job-company">${job.company}</div>
+                            <div class="job-company">${job.company}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${publicJobId}</span>` : ''}</div>
                         </div>
                         <span class="status-badge ${statusClass}">${statusLabels[job.stage] || job.stage}</span>
                     </div>
@@ -1503,11 +1506,13 @@ The AI will automatically extract:
             }
 
             const statusClass = statusClasses[fullJob.stage] || 'status-applied';
+            const publicJobId = fullJob.public_job_id || '';
             content.innerHTML = `
                 <div class="job-detail-header">
                     <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || fullJob.stage}</span>
                     <h3>${fullJob.position}</h3>
                     <div class="company">${fullJob.company}</div>
+                    ${publicJobId ? `<div style="margin-top: 8px;"><span style="display: inline-block; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 3px 8px; background: var(--gray-100); border-radius: 4px;" title="Globally unique Job ID"><i class="fas fa-fingerprint" style="margin-right: 6px;"></i>${publicJobId}</span></div>` : ''}
                 </div>
 
                 <div class="detail-section">
@@ -2409,7 +2414,14 @@ The AI will automatically extract:
 
             document.getElementById('resume-editor-job-title').textContent = job.position;
             document.getElementById('resume-editor-company').textContent = job.company;
-            
+
+            // Display the public job ID next to the title so it's visible in the editor too
+            const publicJobIdSpan = document.getElementById('resume-editor-public-job-id');
+            if (publicJobIdSpan) {
+                publicJobIdSpan.textContent = job.public_job_id || '';
+                publicJobIdSpan.style.display = job.public_job_id ? 'inline' : 'none';
+            }
+
             // Handle both object and string formats for generated_resume
             const resumeContent = typeof job.generated_resume === 'object' ? job.generated_resume.content : job.generated_resume;
             document.getElementById('resume-editor-content').value = resumeContent || '';
@@ -2437,7 +2449,8 @@ The AI will automatically extract:
                         'gpt-oss:120b-cloud': 'GPT-OSS 120B',
                     };
                     // Show revisions newest-first
-                    const sorted = [...revisions].reverse();
+                    const sorted = [...revisions].sort((a, b) => (b.version || 0) - (a.version || 0));
+                    let latestVersion = null;
                     sorted.forEach((rev, idx) => {
                         const isLatest = (idx === 0);
                         const modelLabel = modelLabels[rev.model] || rev.model || 'Unknown';
@@ -2447,8 +2460,16 @@ The AI will automatically extract:
                         option.value = rev.version;
                         option.textContent = label;
                         versionSelect.appendChild(option);
+                        if (isLatest) latestVersion = rev.version;
                     });
                     console.log('[openResumeEditor] Version dropdown populated with', sorted.length, 'options');
+                    // Explicitly select the latest version so the dropdown always reflects
+                    // the most recent regeneration, even if the user previously picked an
+                    // older one. Without this, some browsers keep the prior selection and
+                    // the user sees stale content despite the dropdown showing new options.
+                    if (latestVersion != null) {
+                        versionSelect.value = String(latestVersion);
+                    }
                 }
             }
 

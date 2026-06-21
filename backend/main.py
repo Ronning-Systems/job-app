@@ -42,6 +42,7 @@ from models import (
     GeneratedResume,
     SessionLocal,
     User,
+    generate_public_job_id,
 )
 from job_parser import JobParser
 from agents import agent_service
@@ -123,6 +124,7 @@ class BaseResumeCreate(BaseModel):
 
 class JobResponse(BaseModel):
     id: int
+    public_job_id: Optional[str] = None
     company: str
     position: str
     location: Optional[str]
@@ -181,6 +183,7 @@ async def create_job(
 
     # Create Job record
     job = Job(
+        public_job_id=_generate_unique_public_job_id(db),
         user_id=current_user.id,
         company=job_data.get("company", "Unknown"),
         position=job_data.get("position", "Unknown"),
@@ -473,6 +476,7 @@ _generation_status = {}  # {job_id: {"status": "processing"|"completed"|"error",
 
 def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str):
     """Run resume generation in a background thread, store result in DB and update status dict."""
+    from sqlalchemy.orm.attributes import flag_modified
     try:
         _generation_status[job_id] = {"status": "processing"}
         # Run the async agent in a new event loop (NO DB session held during generation)
@@ -499,15 +503,26 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
         try:
             existing_resume = db.query(GeneratedResume).filter(
                 GeneratedResume.job_id == job_id
-            ).first()
+            ).order_by(GeneratedResume.updated_at.desc()).first()
+
+            model_label = model_override or "qwen3.5:cloud"
 
             if existing_resume:
-                revisions = existing_resume.revisions or []
-                next_version = len(revisions) + 1
-                model_label = model_override or "qwen3.5:cloud"
-                
-                logger.info(f"[generate-resume-bg] Regenerating job {job_id}, existing revisions: {len(revisions)}, next version: {next_version}")
-                
+                # Coerce revisions into a plain list (JSON columns may round-trip as a custom type)
+                revisions = list(existing_resume.revisions or [])
+                # Self-heal version numbers — find the max version already present, then increment.
+                # Falls back to length+1 if any revision is missing a version field.
+                max_version = 0
+                for r in revisions:
+                    if isinstance(r, dict) and isinstance(r.get("version"), int):
+                        if r["version"] > max_version:
+                            max_version = r["version"]
+                next_version = max_version + 1 if max_version else len(revisions) + 1
+
+                logger.info(
+                    f"[generate-resume-bg] Regenerating job {job_id}, existing revisions: {len(revisions)}, next version: {next_version}"
+                )
+
                 revisions.append({
                     "version": next_version,
                     "content": resume_content,
@@ -515,13 +530,19 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     "feedback": None,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
+
+                # Assign a brand-new list (not the same reference we appended to) so SQLAlchemy
+                # is guaranteed to see the change. flag_modified is the belt-and-suspenders for
+                # JSON columns on backends where in-place mutation may not trigger a write.
                 existing_resume.current_content = resume_content
-                existing_resume.revisions = list(revisions)  # new list to trigger SQLAlchemy dirty flag
+                existing_resume.revisions = list(revisions)
+                flag_modified(existing_resume, "revisions")
                 existing_resume.updated_at = datetime.utcnow()
-                db.add(existing_resume)  # force dirty
                 generated_resume = existing_resume
-                
-                logger.info(f"[generate-resume-bg] Appended revision v{next_version} with model {model_label}, total revisions now: {len(revisions)}")
+
+                logger.info(
+                    f"[generate-resume-bg] Appended revision v{next_version} with model {model_label}, total revisions now: {len(revisions)}"
+                )
             else:
                 generated_resume = GeneratedResume(
                     job_id=job_id,
@@ -530,7 +551,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     revisions=[{
                         "version": 1,
                         "content": resume_content,
-                        "model": model_override or "qwen3.5:cloud",
+                        "model": model_label,
                         "feedback": None,
                         "timestamp": datetime.utcnow().isoformat(),
                     }],
@@ -738,9 +759,15 @@ async def revise_job_resume(
     import json
     resume_content = resume_result.get("content", json.dumps(resume_result))
 
-    # Append new revision with model info
-    revisions = existing_resume.revisions or []
-    next_version = len(revisions) + 1
+    # Append new revision with model info, robust against stale version numbers
+    from sqlalchemy.orm.attributes import flag_modified
+    revisions = list(existing_resume.revisions or [])
+    max_version = 0
+    for r in revisions:
+        if isinstance(r, dict) and isinstance(r.get("version"), int):
+            if r["version"] > max_version:
+                max_version = r["version"]
+    next_version = max_version + 1 if max_version else len(revisions) + 1
     model_used = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "kimi-k2.5:cloud")
     revisions.append({
         "version": next_version,
@@ -750,7 +777,8 @@ async def revise_job_resume(
         "timestamp": datetime.utcnow().isoformat(),
     })
     existing_resume.current_content = resume_content
-    existing_resume.revisions = revisions
+    existing_resume.revisions = list(revisions)
+    flag_modified(existing_resume, "revisions")
     existing_resume.updated_at = datetime.utcnow()
     job.updated_at = datetime.utcnow()
     db.commit()
@@ -821,6 +849,17 @@ def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_cu
     return stats
 
 
+def _generate_unique_public_job_id(db: Session) -> str:
+    """Generate a public_job_id that doesn't collide with any existing row."""
+    for _ in range(20):
+        candidate = generate_public_job_id()
+        existing = db.query(Job).filter(Job.public_job_id == candidate).first()
+        if not existing:
+            return candidate
+    # Astronomically unlikely — fall back with extra entropy
+    return generate_public_job_id(length=12)
+
+
 def format_job_response(
     job: Job, application: JobApplication, db: Session = None
 ) -> dict:
@@ -853,6 +892,7 @@ def format_job_response(
 
     return {
         "id": job.id,
+        "public_job_id": job.public_job_id,
         "company": job.company,
         "position": job.position,
         "location": job.location,

@@ -1,5 +1,6 @@
 import os
 import logging
+import secrets
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
@@ -10,6 +11,16 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
+
+
+def generate_public_job_id(length: int = 8) -> str:
+    """Generate a globally unique short alphanumeric code for a job.
+
+    Uses a 32-char alphabet (no ambiguous chars) and re-rolls on collision.
+    Format: JOB-XXXXXXXX (e.g., JOB-A7K2M9P3)
+    """
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 32 chars, no 0/O/1/I
+    return "JOB-" + "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 class User(Base):
@@ -32,6 +43,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, index=True)
+    public_job_id = Column(String(32), unique=True, index=True, nullable=True)  # Globally unique short code
     company = Column(String, nullable=False)
     position = Column(String, nullable=False)
     location = Column(String)
@@ -180,6 +192,44 @@ def _run_migrations(eng):
                     "ALTER TABLE generated_resumes ADD COLUMN user_id INTEGER REFERENCES users(id)"
                 ))
                 conn.commit()
+
+    # Check jobs table for missing columns (public_job_id)
+    if 'jobs' in inspector.get_table_names():
+        existing_cols = [c['name'] for c in inspector.get_columns('jobs')]
+        with eng.connect() as conn:
+            if 'public_job_id' not in existing_cols:
+                logger.info("Migrating: adding 'public_job_id' column to jobs")
+                # Use VARCHAR(32) for both SQLite and PostgreSQL — SQLite is type-affinity loose.
+                conn.execute(text(
+                    "ALTER TABLE jobs ADD COLUMN public_job_id VARCHAR(32)"
+                ))
+                conn.commit()
+                # Backfill any existing rows with a unique code
+                rows = conn.execute(text("SELECT id FROM jobs WHERE public_job_id IS NULL")).fetchall()
+                for row in rows:
+                    job_id = row[0]
+                    for _ in range(10):  # try up to 10 times to dodge the rare collision
+                        candidate = generate_public_job_id()
+                        existing = conn.execute(
+                            text("SELECT 1 FROM jobs WHERE public_job_id = :pid"),
+                            {"pid": candidate},
+                        ).first()
+                        if not existing:
+                            conn.execute(
+                                text("UPDATE jobs SET public_job_id = :pid WHERE id = :id"),
+                                {"pid": candidate, "id": job_id},
+                            )
+                            break
+                conn.commit()
+
+            # Add unique index on public_job_id (idempotent)
+            try:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_public_job_id ON jobs (public_job_id)"
+                ))
+                conn.commit()
+            except Exception as e:
+                logger.debug(f"Unique index on public_job_id may already exist: {e}")
 
 
 def get_db():
