@@ -2534,6 +2534,8 @@ The AI will automatically extract:
                 if (result.resume) {
                     job.generated_resume = result.resume;
                     job.resume_revisions = result.revisions || [];
+                    job.structured_content = result.structured_content || null;
+                    job.atoms_snapshot = result.atoms_snapshot || null;
                     await fetchJobs();
                     openResumeEditor(jobId);
                     return;
@@ -2560,21 +2562,29 @@ The AI will automatically extract:
                     const pollResult = await pollResponse.json();
 
                     if (pollResult.status === 'completed') {
-                        // Generation finished — load the result
-                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0);
+                        // Generation finished — copy structured fields from the
+                        // polling response FIRST so they're available even if
+                        // fetchJobs fails. fetchJobs will overwrite with the
+                        // canonical state right after.
+                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0, 'mode:', pollResult.mode);
                         job.generated_resume = pollResult.resume;
                         job.resume_revisions = pollResult.revisions || [];
+                        job.structured_content = pollResult.structured_content || null;
+                        job.atoms_snapshot = pollResult.atoms_snapshot || null;
+
                         await fetchJobs();
-                        
+
                         // Refresh the jobs array with the latest data
                         const updatedJob = jobs.find(j => j.id === jobId);
                         if (updatedJob) {
                             // Update the local job reference with fresh data from fetchJobs
                             job.generated_resume = updatedJob.generated_resume;
                             job.resume_revisions = updatedJob.resume_revisions || [];
-                            console.log('[generateResume] Updated job from fetchJobs, revisions:', updatedJob.resume_revisions?.length || 0);
+                            job.structured_content = updatedJob.structured_content || null;
+                            job.atoms_snapshot = updatedJob.atoms_snapshot || null;
+                            console.log('[generateResume] Updated job from fetchJobs, structured atoms:', job.structured_content?.atoms?.length || 0);
                         }
-                        
+
                         openResumeEditor(jobId);
                         return;
                     } else if (pollResult.status === 'error') {
@@ -2638,13 +2648,27 @@ The AI will automatically extract:
         function renderStructuredEditor(sc) {
             const container = document.getElementById('resume-editor-structured');
             if (!sc || !Array.isArray(sc.atoms) || sc.atoms.length === 0) {
+                const hasAtoms = currentAtoms && currentAtoms.length > 0;
                 container.innerHTML = `
                     <div style="text-align: center; color: var(--gray-500); padding: 40px 20px;">
                         <i class="fas fa-stream" style="font-size: 2rem; margin-bottom: 12px; display: block;"></i>
-                        <p>No structured content for this resume yet.</p>
-                        <p style="font-size: 0.85rem;">Generate or revise the resume to populate structured content.</p>
+                        <p style="font-weight: 500; color: var(--gray-700);">No structured content for this resume yet.</p>
+                        ${hasAtoms
+                            ? `<p style="font-size: 0.9rem; margin-top: 4px;">Your template is configured (${currentAtoms.length} atoms). Click <strong>Regenerate</strong> to populate this view — one LLM call fills both tabs.</p>
+                               <button type="button" id="btn-regenerate-from-empty" class="btn btn-primary" style="margin-top: 12px;">
+                                   <i class="fas fa-sync-alt"></i> Regenerate now
+                               </button>`
+                            : `<p style="font-size: 0.9rem; margin-top: 4px;">Upload a template DOCX in <strong>Resume Settings</strong> to enable structured output. Otherwise this resume uses plain text mode.</p>`
+                        }
                     </div>
                 `;
+                // Wire the inline "Regenerate now" button when present
+                const inlineBtn = document.getElementById('btn-regenerate-from-empty');
+                if (inlineBtn) {
+                    inlineBtn.addEventListener('click', () => {
+                        if (currentEditingJobId) generateResume(currentEditingJobId);
+                    });
+                }
                 return;
             }
             const atomsById = {};
