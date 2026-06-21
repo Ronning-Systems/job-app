@@ -1114,6 +1114,7 @@ def format_job_response(
     # Get latest generated resume
     generated_resume = None
     resume_revisions = []
+    latest_resume = None
     if db:
         latest_resume = (
             db.query(GeneratedResume)
