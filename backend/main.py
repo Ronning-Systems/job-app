@@ -799,6 +799,12 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 "mode": resume_result.get("mode", "plain"),
                 "structured_empty_ratio": round(empty_ratio, 3),
             }
+            logger.info(
+                f"[generate-resume-bg] Completed job {job_id}: "
+                f"mode={resume_result.get('mode')}, "
+                f"structured_content atoms={len(structured_content.get('atoms', [])) if structured_content else 0}, "
+                f"empty_ratio={round(empty_ratio, 3)}"
+            )
         finally:
             db.close()
     except Exception as e:
@@ -897,6 +903,14 @@ async def generate_job_resume(
         logger.info(
             f"[generate-resume] Template atoms loaded: {[a.get('id') for a in atoms]}"
         )
+    else:
+        logger.info(
+            f"[generate-resume] No template atoms found in DB for user {current_user.id}"
+        )
+
+    # Resolve actual model: override wins, else env var
+    actual_model = model_override or os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "qwen3.5:cloud")
+    logger.info(f"[generate-resume] Using model: {actual_model} (override={model_override})")
 
     # Launch background generation
     _generation_status[job_id] = {"status": "processing"}
@@ -935,6 +949,13 @@ async def get_generate_resume_status(
         ).order_by(GeneratedResume.updated_at.desc()).first()
 
         if latest:
+            sc = latest.structured_content
+            logger.info(
+                f"[status] job_id={job_id} status=completed, "
+                f"structured_content={'present (' + str(len(sc.get('atoms', [])) if sc else 0) + ' atoms)'} if sc else 'None/Missing', "
+                f"mode={status.get('mode')}, "
+                f"empty_ratio={status.get('structured_empty_ratio', 0.0)}"
+            )
             return {
                 "status": "completed",
                 "job_id": job_id,
