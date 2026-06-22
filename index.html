@@ -2000,12 +2000,12 @@ The AI will automatically extract:
                 document.getElementById('resume-editor-content').value = rev.content || '';
                 // Also load that revision's structured content (if any) so
                 // the structured editor reflects the picked version.
-                if (rev.structured_content) {
+                if (rev.structured_content &&
+                    Array.isArray(rev.structured_content.atoms) &&
+                    rev.structured_content.atoms.length > 0) {
                     currentStructuredContent = JSON.parse(JSON.stringify(rev.structured_content));
-                    if (currentAtoms.length > 0) {
-                        renderStructuredEditor(currentStructuredContent);
-                        switchResumeEditorTab('structured', true);
-                    }
+                    renderStructuredEditor(currentStructuredContent);
+                    switchResumeEditorTab('structured', true);
                 } else {
                     // Revision predates structured mode — fall back to plain
                     currentStructuredContent = null;
@@ -2983,9 +2983,9 @@ The AI will automatically extract:
                 ? JSON.parse(JSON.stringify(job.structured_content))
                 : null;
 
-            // Decide which tab is the default: structured if we have atoms AND
+            // Decide which tab is the default: structured if we have
             // structured content; plain text otherwise.
-            const hasStructured = currentAtoms.length > 0 && currentStructuredContent
+            const hasStructured = currentStructuredContent
                 && Array.isArray(currentStructuredContent.atoms)
                 && currentStructuredContent.atoms.length > 0;
             const atomsBadge = document.getElementById('resume-editor-atoms-badge');
