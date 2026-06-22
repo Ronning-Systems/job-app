@@ -1783,7 +1783,7 @@ The AI will automatically extract:
                 let errorMsg = error.message;
 
                 if (errorMsg.includes('Ollama') || errorMsg.includes('parse')) {
-                    errorMsg = 'Failed to analyze job description. Please ensure Ollama is running and the job text is valid.';
+                    errorMsg = 'Failed to analyze job description:\n' + errorMsg;
                 }
 
                 alert('Error saving job:\n' + errorMsg);

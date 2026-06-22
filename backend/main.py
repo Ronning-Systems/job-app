@@ -513,6 +513,7 @@ def update_structured_resume(
         raise HTTPException(status_code=404, detail="No generated resume to edit")
 
     resume.structured_content = request.structured_content
+    flag_modified(resume, "structured_content")
     if request.current_content is not None:
         resume.current_content = request.current_content
     resume.updated_at = datetime.utcnow()
@@ -725,8 +726,10 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 existing_resume.revisions = list(revisions)
                 if structured_content is not None:
                     existing_resume.structured_content = structured_content
+                    flag_modified(existing_resume, "structured_content")
                 if atoms is not None:
                     existing_resume.atoms_snapshot = [a.get("id") for a in atoms]
+                    flag_modified(existing_resume, "atoms_snapshot")
                 flag_modified(existing_resume, "revisions")
                 existing_resume.updated_at = datetime.utcnow()
                 generated_resume = existing_resume
@@ -1037,6 +1040,7 @@ async def revise_job_resume(
     existing_resume.revisions = list(revisions)
     if revised_structured is not None:
         existing_resume.structured_content = revised_structured
+        flag_modified(existing_resume, "structured_content")
     flag_modified(existing_resume, "revisions")
     existing_resume.updated_at = datetime.utcnow()
     job.updated_at = datetime.utcnow()
