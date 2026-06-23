@@ -98,6 +98,7 @@ class OllamaAgent:
         )
         self.model = os.getenv("MODEL_AGENTS", "llama3.2:latest")
         self.generation_model = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "llama3.2:latest")
+        self.generation_model_fallback = os.getenv("MODEL_GENERATION_FALLBACK")
         self.api_key = os.getenv("OLLAMA_API_KEY", "")
         self.is_cloud = "ollama.com" in self.base_url
         self.timeout = 240.0
@@ -105,13 +106,14 @@ class OllamaAgent:
     async def generate(
         self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
     ) -> str:
-        """Generate text using Ollama (local or cloud)"""
+        """Generate text using Ollama (local or cloud) with optional fallback."""
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         headers["Content-Type"] = "application/json"
 
-        model_name = model or self.model
+        model_name = model or self.generation_model
+        model_to_use = model_name
 
         if self.is_cloud:
             # Ollama Cloud: OpenAI-compatible /v1/chat/completions
@@ -121,7 +123,7 @@ class OllamaAgent:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
             payload = {
-                "model": model_name,
+                "model": model_to_use,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": 32000,
@@ -130,7 +132,7 @@ class OllamaAgent:
             # Local Ollama: /api/generate
             url = f"{self.base_url}/api/generate"
             payload = {
-                "model": model_name,
+                "model": model_to_use,
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": temperature, "num_predict": 32000},
@@ -139,13 +141,27 @@ class OllamaAgent:
                 payload["system"] = system
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            if self.is_cloud:
-                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            else:
-                return data.get("response", "")
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if self.is_cloud:
+                    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                else:
+                    return data.get("response", "")
+            except Exception as e:
+                # Try fallback model if configured
+                if self.generation_model_fallback and model_to_use != self.generation_model_fallback:
+                    logger.warning(f"Model {model_to_use} failed ({e}), trying fallback: {self.generation_model_fallback}")
+                    payload["model"] = self.generation_model_fallback
+                    response = await client.post(url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    if self.is_cloud:
+                        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    else:
+                        return data.get("response", "")
+                raise
 
 
 class AgentService:
@@ -561,7 +577,7 @@ ATOM VOCABULARY (use only these atom_ids):
 {atom_spec_text}
 
 ATOM PURPOSES:
-- title: top of resume — name + tagline. Segments separated by " | ".
+- title: top of resume — job title/tagline ONLY (name is already in template header). Segments separated by " | ".
 - section_header: "Core Competencies", "Professional Experience", "Education", etc.
 - role_title: a job title like "Chief Technology Officer" within an Experience section.
 - role_line: directly under role_title — segments separated by " | " like "<Company> | <Location> | <Dates>". First segment is the company name, mark it bold:true.
@@ -785,7 +801,7 @@ ATOM VOCABULARY (use only these atom_ids):
 {atom_spec_text}
 
 ATOM PURPOSES:
-- title: top of resume — name + tagline. Segments separated by " | ".
+- title: top of resume — job title/tagline ONLY (name is already in template header). Segments separated by " | ".
 - section_header: "Core Competencies", "Professional Experience", "Education", etc.
 - role_title: a job title within an Experience section.
 - role_line: directly under role_title — segments separated by " | ". First segment is company name with "bold": true.
@@ -861,7 +877,7 @@ Output the JSON now:"""
 
 
 _ATOM_PURPOSES = {
-    "title": "top-of-resume name + tagline (segments separated by ' | ')",
+    "title": "top-of-resume job title/tagline ONLY (name is in template header) (segments separated by ' | ')",
     "section_header": "section heading like 'Core Competencies', 'Professional Experience', 'Education'",
     "role_title": "a job title inside an Experience section",
     "role_line": "directly under role_title: 'Company | Location | Dates' (first segment is bolded company name)",
@@ -880,7 +896,7 @@ def _atom_purpose(atom_id: str) -> str:
 def _atom_schema_hint(atom_id: str) -> str:
     """Describe the JSON shape the LLM should emit for this atom."""
     if atom_id == "title":
-        return '{"atom_id": "title", "segments": [{"text": "<Name>"}, {"text": " | "}, {"text": "<Tagline>"}]}'
+        return '{"atom_id": "title", "segments": [{"text": "<Job Title/Tagline>"}]}'
     if atom_id == "role_line":
         return '{"atom_id": "role_line", "segments": [{"text": "<Company>", "bold": true}, {"text": " | <Location> | <Dates>"}]}'
     if atom_id in ("section_header", "role_title"):
