@@ -1049,7 +1049,9 @@ The AI will automatically extract:
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-microchip"></i> Model:</span>
                         <select id="resume-model-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
-                            <option value="">Default (qwen3.5:cloud)</option>
+                            <option value="">Default (gemma3:12b-cloud)</option>
+                            <option value="gemma3:12b-cloud">Gemma 3 12B</option>
+                            <option value="rnj-1:8b-cloud">RNJ-1 8B</option>
                             <option value="qwen3.5:cloud">Qwen 3.5</option>
                             <option value="minimax-m3:cloud">MiniMax M3</option>
                             <option value="minimax-m2.5:cloud">MiniMax M2.5</option>
@@ -1067,28 +1069,13 @@ The AI will automatically extract:
                         </select>
                     </div>
                 </div>
-                <div style="display: flex; gap: 4px; padding: 8px 16px 0; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
-                    <button id="resume-editor-tab-structured" class="resume-editor-tab active" type="button" style="padding: 6px 12px; font-size: 0.85rem; border: 1px solid var(--gray-300); border-bottom: none; border-radius: 6px 6px 0 0; background: white; color: var(--gray-800); cursor: pointer; margin-right: 2px;">
-                        <i class="fas fa-stream"></i> Structured
-                    </button>
-                    <button id="resume-editor-tab-plain" class="resume-editor-tab" type="button" style="padding: 6px 12px; font-size: 0.85rem; border: 1px solid var(--gray-300); border-bottom: none; border-radius: 6px 6px 0 0; background: var(--gray-100); color: var(--gray-600); cursor: pointer;">
-                        <i class="fas fa-paragraph"></i> Plain text
-                    </button>
-                    <span id="resume-editor-atoms-badge" style="display: none; align-self: center; margin-left: 8px; padding: 2px 8px; background: var(--info); color: white; border-radius: 10px; font-size: 0.7rem; font-weight: 500;" title="Generated using your saved template's atoms"></span>
-                </div>
-                <div id="resume-editor-structured" style="flex: 1; overflow-y: auto; padding: 16px; background: white;">
-                    <!-- Per-atom editable cards rendered by renderStructuredEditor() -->
-                </div>
-                <textarea id="resume-editor-content" style="flex: 1; display: none; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch; background: white;"></textarea>
+                <textarea id="resume-editor-content" style="flex: 1; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch; background: white;"></textarea>
             </div>
             <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <button class="btn btn-secondary" id="btn-cancel-resume-editor">Close</button>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button class="btn btn-secondary" id="btn-regenerate-resume">
                         <i class="fas fa-sync-alt"></i> Regenerate
-                    </button>
-                    <button class="btn btn-primary" id="btn-apply-structured-edits" style="display: none;">
-                        <i class="fas fa-save"></i> Save Edits
                     </button>
                     <button class="btn btn-success" id="btn-export-resume">
                         <i class="fas fa-file-word"></i> Export DOCX
@@ -1106,17 +1093,6 @@ The AI will automatically extract:
         };
 
         let currentEditingJobId = null;
-
-        // ---------- Structured-resume state ---------------------------------
-        // Parsed template atoms (loaded from server at startup or when the
-        // user opens Resume Settings). When present, generated resumes use
-        // structured mode and the editor shows per-atom cards.
-        let currentAtoms = [];
-        // Working copy of the structured content for the currently-editing
-        // resume. Mirrors job.structured_content when the modal opens.
-        let currentStructuredContent = null;
-        // Pending template upload: {name, contentB64, parseResult}
-        let pendingTemplate = null;
 
         // Sample data
         let jobs = [
@@ -1998,19 +1974,6 @@ The AI will automatically extract:
             const rev = job.resume_revisions.find(r => r.version === version);
             if (rev) {
                 document.getElementById('resume-editor-content').value = rev.content || '';
-                // Also load that revision's structured content (if any) so
-                // the structured editor reflects the picked version.
-                if (rev.structured_content &&
-                    Array.isArray(rev.structured_content.atoms) &&
-                    rev.structured_content.atoms.length > 0) {
-                    currentStructuredContent = JSON.parse(JSON.stringify(rev.structured_content));
-                    renderStructuredEditor(currentStructuredContent);
-                    switchResumeEditorTab('structured', true);
-                } else {
-                    // Revision predates structured mode — fall back to plain
-                    currentStructuredContent = null;
-                    switchResumeEditorTab('plain', true);
-                }
             }
         });
 
@@ -2060,10 +2023,7 @@ The AI will automatically extract:
         document.getElementById('btn-template-confirm').addEventListener('click', confirmTemplateUpload);
         document.getElementById('btn-template-cancel').addEventListener('click', cancelTemplateUpload);
 
-        // Resume editor tabs + apply edits
-        document.getElementById('resume-editor-tab-structured').addEventListener('click', () => switchResumeEditorTab('structured'));
-        document.getElementById('resume-editor-tab-plain').addEventListener('click', () => switchResumeEditorTab('plain'));
-        document.getElementById('btn-apply-structured-edits').addEventListener('click', applyStructuredEdits);
+        // Resume editor - plain text only
 
         // Load resume settings from database into localStorage
         async function loadResumeSettingsFromDB() {
@@ -2106,9 +2066,7 @@ The AI will automatically extract:
             renderTemplateList(settings.templateFile);
         }
 
-        // Load template atoms from the server (used at startup and on demand).
-        // Stored on `currentAtoms` so the structured editor and DOCX export
-        // can use them.
+        // Load template atoms from the server for DOCX export
         async function loadCurrentTemplateAtoms() {
             try {
                 const r = await apiFetch(`${API_URL}/template`);
@@ -2613,342 +2571,18 @@ The AI will automatically extract:
             }
         };
 
-        // Open resume editor
-        // ---------- Structured resume editor -------------------------------
-
-        function switchResumeEditorTab(tab, skipRender) {
-            const tabStructured = document.getElementById('resume-editor-tab-structured');
-            const tabPlain = document.getElementById('resume-editor-tab-plain');
-            const structuredPane = document.getElementById('resume-editor-structured');
-            const plainPane = document.getElementById('resume-editor-content');
-            const applyBtn = document.getElementById('btn-apply-structured-edits');
-
-            if (tab === 'structured') {
-                tabStructured.style.background = 'white';
-                tabStructured.style.color = 'var(--gray-800)';
-                tabPlain.style.background = 'var(--gray-100)';
-                tabPlain.style.color = 'var(--gray-600)';
-                structuredPane.style.display = 'block';
-                plainPane.style.display = 'none';
-                applyBtn.style.display = 'inline-flex';
-                if (!skipRender) renderStructuredEditor(currentStructuredContent);
-            } else {
-                tabStructured.style.background = 'var(--gray-100)';
-                tabStructured.style.color = 'var(--gray-600)';
-                tabPlain.style.background = 'white';
-                tabPlain.style.color = 'var(--gray-800)';
-                structuredPane.style.display = 'none';
-                plainPane.style.display = 'block';
-                applyBtn.style.display = 'none';
-                // Sync the plain textarea with current structured content so
-                // users see consistent content if they switch tabs.
-                plainPane.value = _structuredToPlainText(currentStructuredContent) || plainPane.value;
-            }
-        }
-
-        function _structuredToPlainText(sc) {
-            if (!sc || !Array.isArray(sc.atoms)) return '';
-            return sc.atoms.map(entry => {
-                if (entry.segments) return entry.segments.map(s => s.text || '').join('');
-                return entry.text || '';
-            }).join('\n');
-        }
-
-        // Returns 0.0–1.0 = fraction of atoms whose text content is empty.
-        // Used to detect LLM outputs that produced valid JSON structure but
-        // blank strings (a common failure mode for small/cheap models).
-        function _measureStructuredEmptyRatio(atoms) {
-            if (!Array.isArray(atoms) || atoms.length === 0) return 0;
-            let empty = 0;
-            for (const a of atoms) {
-                let hasContent = false;
-                if (Array.isArray(a.segments) && a.segments.length > 0) {
-                    hasContent = a.segments.some(s => (s.text || '').trim().length > 0);
-                } else if (typeof a.text === 'string') {
-                    hasContent = a.text.trim().length > 0;
-                }
-                if (!hasContent) empty += 1;
-            }
-            return empty / atoms.length;
-        }
-
-        // Render the structured content into per-atom editable cards.
-        function renderStructuredEditor(sc) {
-            const container = document.getElementById('resume-editor-structured');
-            if (!sc || !Array.isArray(sc.atoms) || sc.atoms.length === 0) {
-                const hasAtoms = currentAtoms && currentAtoms.length > 0;
-                container.innerHTML = `
-                    <div style="text-align: center; color: var(--gray-500); padding: 40px 20px;">
-                        <i class="fas fa-stream" style="font-size: 2rem; margin-bottom: 12px; display: block;"></i>
-                        <p style="font-weight: 500; color: var(--gray-700);">No structured content for this resume yet.</p>
-                        ${hasAtoms
-                            ? `<p style="font-size: 0.9rem; margin-top: 4px;">Your template is configured (${currentAtoms.length} atoms). Click <strong>Regenerate</strong> to populate this view — one LLM call fills both tabs.</p>
-                               <button type="button" id="btn-regenerate-from-empty" class="btn btn-primary" style="margin-top: 12px;">
-                                   <i class="fas fa-sync-alt"></i> Regenerate now
-                               </button>`
-                            : `<p style="font-size: 0.9rem; margin-top: 4px;">Upload a template DOCX in <strong>Resume Settings</strong> to enable structured output. Otherwise this resume uses plain text mode.</p>`
-                        }
-                    </div>
-                `;
-                // Wire the inline "Regenerate now" button when present
-                const inlineBtn = document.getElementById('btn-regenerate-from-empty');
-                if (inlineBtn) {
-                    inlineBtn.addEventListener('click', () => {
-                        if (currentEditingJobId) generateResume(currentEditingJobId);
-                    });
-                }
-                return;
-            }
-            const atomsById = {};
-            for (const a of currentAtoms) atomsById[a.id] = a;
-
-            // Group atoms by type for clearer editing.
-            const sections = _groupStructuredForEditing(sc.atoms);
-
-            // Detect a "mostly empty" result — happens when the LLM emits
-            // valid JSON structure but with empty text/segments (smaller /
-            // cheaper models sometimes do this). Warn the user so they know
-            // to switch models or click Regenerate again.
-            const emptyRatio = _measureStructuredEmptyRatio(sc.atoms);
-            let warningBanner = '';
-            if (emptyRatio >= 0.7) {
-                warningBanner = `
-                    <div style="margin-bottom: 14px; padding: 10px 14px; background: #fff3cd; border: 1px solid #ffeaa7; border-left: 3px solid #f39c12; border-radius: 6px; color: #856404;">
-                        <strong><i class="fas fa-exclamation-triangle"></i> Most fields are empty.</strong>
-                        <div style="font-size: 0.85rem; margin-top: 4px;">
-                            The model returned valid JSON but with blank text. Try a different model (Qwen 3.5 is the most reliable for structured output) or click Regenerate again.
-                        </div>
-                    </div>
-                `;
-            }
-
-            let html = warningBanner;
-            for (const section of sections) {
-                html += `<div style="margin-bottom: 18px; padding: 12px; background: var(--gray-50); border-radius: 8px; border: 1px solid var(--gray-200);">`;
-                html += `<div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 8px; font-weight: 600;">${section.label}</div>`;
-
-                for (const item of section.items) {
-                    const atom = atomsById[item.atom_id] || {};
-                    const fontSize = atom.size_half_points ? `${atom.size_half_points / 2}pt` : '12pt';
-                    const fontName = atom.font_ascii || 'serif';
-                    const fontWeight = atom.bold ? 'bold' : 'normal';
-
-                    html += `<div style="margin-bottom: 8px;">`;
-
-                    if (item.atom_id === 'section_header' || item.atom_id === 'role_title') {
-                        // Single text field
-                        html += `<input type="text" data-atom-idx="${item.idx}" data-field="text"
-                            value="${escapeAttr(item.text || '')}"
-                            placeholder="${atom.description || 'Enter text...'}"
-                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 4px; font-family: ${fontName}, serif; font-size: ${fontSize}; font-weight: ${fontWeight}; background: white; color: var(--gray-800);"
-                        />`;
-                    } else if (item.atom_id === 'title') {
-                        // Segments separated by " | "
-                        html += _renderSegmentsField(item, fontSize, fontName, fontWeight, 'Title | Subtitle');
-                    } else if (item.atom_id === 'role_line') {
-                        // Segments with company bold
-                        html += _renderSegmentsField(item, fontSize, fontName, fontWeight, 'Company | Location | Dates');
-                    } else if (item.atom_id.startsWith('bullet') || item.atom_id === 'body_para') {
-                        // Single segment
-                        const segText = (item.segments && item.segments[0]) ? (item.segments[0].text || '') : '';
-                        html += `<textarea data-atom-idx="${item.idx}" data-field="segment-0" rows="2"
-                            placeholder="${atom.description || ''}"
-                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 4px; font-family: ${fontName}, serif; font-size: ${fontSize}; font-weight: ${fontWeight}; background: white; color: var(--gray-800); resize: vertical;">${escapeHtml(segText)}</textarea>`;
-                    } else {
-                        // Fallback: just JSON dump
-                        html += `<div style="font-family: monospace; font-size: 0.75rem; color: var(--gray-500);">${escapeHtml(JSON.stringify(item))}</div>`;
-                    }
-
-                    html += `</div>`;
-                }
-
-                html += `</div>`;
-            }
-            container.innerHTML = html;
-        }
-
-        function _renderSegmentsField(item, fontSize, fontName, fontWeight, placeholder) {
-            const segs = item.segments || [];
-            const segCount = segs.length || 1;
-            let html = `<div style="display: flex; flex-direction: column; gap: 4px;">`;
-            html += `<div style="font-size: 0.7rem; color: var(--gray-500); font-style: italic;">${escapeHtml(placeholder)}</div>`;
-            for (let i = 0; i < segCount; i++) {
-                const seg = segs[i] || { text: '' };
-                const isSep = (seg.text || '').trim() === '|';
-                if (isSep) {
-                    html += `<input type="text" data-atom-idx="${item.idx}" data-field="sep-${i}" value="|"
-                        style="width: 24px; text-align: center; border: none; background: transparent; color: var(--gray-400); padding: 2px;" readonly />`;
-                } else {
-                    const bold = seg.bold ? 'font-weight: bold;' : '';
-                    html += `<input type="text" data-atom-idx="${item.idx}" data-field="segment-${i}" data-bold="${seg.bold ? 'true' : 'false'}"
-                        value="${escapeAttr(seg.text || '')}"
-                        placeholder="${i === 0 && seg.bold ? 'Company (bolded)' : ''}"
-                        style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 4px; font-family: ${fontName}, serif; font-size: ${fontSize}; font-weight: ${fontWeight}; ${bold} background: white; color: var(--gray-800);"
-                    />`;
-                }
-            }
-            // Allow adding/removing segments
-            html += `<div style="display: flex; gap: 4px; margin-top: 4px;">
-                <button type="button" data-action="add-segment" data-atom-idx="${item.idx}" style="font-size: 0.75rem; padding: 2px 8px; border: 1px solid var(--gray-300); border-radius: 4px; background: white; cursor: pointer;">+ Add segment</button>
-                ${segCount > 1 ? `<button type="button" data-action="remove-last-segment" data-atom-idx="${item.idx}" style="font-size: 0.75rem; padding: 2px 8px; border: 1px solid var(--gray-300); border-radius: 4px; background: white; cursor: pointer;">− Remove last</button>` : ''}
-            </div>`;
-            html += `</div>`;
-            return html;
-        }
-
-        // Group consecutive atoms into named sections for the editor UI.
-        // Doesn't change the underlying data — just makes the editor more
-        // navigable.
-        function _groupStructuredForEditing(atoms) {
-            const sections = [];
-            let current = { label: 'Header', items: [] };
-            sections.push(current);
-
-            for (let idx = 0; idx < atoms.length; idx++) {
-                const a = atoms[idx];
-                a._idx = idx; // remember original index
-                const item = { idx, atom_id: a.atom_id, atom: a };
-
-                if (a.atom_id === 'title') {
-                    current = { label: 'Header', items: [] };
-                    sections.push(current);
-                    current.items.push(item);
-                    continue;
-                }
-                if (a.atom_id === 'section_header') {
-                    const label = (a.text || '').trim() || 'Section';
-                    current = { label, items: [] };
-                    sections.push(current);
-                    continue;
-                }
-                current.items.push(item);
-            }
-            // Drop empty sections
-            return sections.filter(s => s.items.length > 0);
-        }
-
-        function escapeHtml(s) {
-            return String(s).replace(/[&<>"']/g, c => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            }[c]));
-        }
-        function escapeAttr(s) {
-            return escapeHtml(s);
-        }
-
-        // Read the current structured editor state back into a fresh
-        // structured_content object. Updates currentStructuredContent in place.
-        function _readStructuredEditor() {
-            if (!currentStructuredContent) {
-                currentStructuredContent = { atoms: [] };
-            }
-            const container = document.getElementById('resume-editor-structured');
-
-            // Walk each input/textarea and apply to the matching atom
-            const inputs = container.querySelectorAll('[data-atom-idx]');
-            const dirty = new Set();
-            for (const el of inputs) {
-                const idx = parseInt(el.getAttribute('data-atom-idx'));
-                if (!currentStructuredContent.atoms[idx]) continue;
-                const atom = currentStructuredContent.atoms[idx];
-                const field = el.getAttribute('data-field');
-                if (field === 'text') {
-                    atom.text = el.value;
-                } else if (field.startsWith('segment-')) {
-                    if (!atom.segments) atom.segments = [];
-                    const si = parseInt(field.split('-')[1]);
-                    if (!atom.segments[si]) atom.segments[si] = { text: '' };
-                    atom.segments[si].text = el.value;
-                    const wantBold = el.getAttribute('data-bold') === 'true';
-                    if (wantBold) atom.segments[si].bold = true;
-                }
-                dirty.add(idx);
-            }
-            return currentStructuredContent;
-        }
-
-        // Re-render after a structural change (e.g., adding a segment)
-        // We re-bind, so this replaces the editor content.
-        let _suppressSegmentButtons = false;
-        document.addEventListener('click', (e) => {
-            if (_suppressSegmentButtons) return;
-            const target = e.target;
-            if (!target || !target.getAttribute) return;
-            const action = target.getAttribute('data-action');
-            if (!action) return;
-            const idx = parseInt(target.getAttribute('data-atom-idx'));
-            if (isNaN(idx)) return;
-
-            _readStructuredEditor();
-            if (!currentStructuredContent || !currentStructuredContent.atoms[idx]) return;
-            const atom = currentStructuredContent.atoms[idx];
-
-            if (action === 'add-segment') {
-                if (!atom.segments) atom.segments = [];
-                atom.segments.push({ text: '' });
-            } else if (action === 'remove-last-segment') {
-                if (atom.segments && atom.segments.length > 1) atom.segments.pop();
-            } else {
-                return;
-            }
-            renderStructuredEditor(currentStructuredContent);
-        });
-
-        // Persist structured edits to the server. Updates the local job's
-        // current_content + structured_content so subsequent operations see
-        // the change.
-        async function applyStructuredEdits() {
-            if (!currentEditingJobId) return;
-            const job = jobs.find(j => j.id === currentEditingJobId);
-            if (!job) return;
-
-            const sc = _readStructuredEditor();
-            const plain = _structuredToPlainText(sc);
-
-            // Persist to backend. We piggyback on /revise-resume? No — that's
-            // for LLM-driven revisions. Instead we add a simple PATCH-style
-            // endpoint... but for now, the simplest reliable path is to
-            // update the local job and let the next regenerate overwrite.
-            // For this iteration, structured edits stay client-side until the
-            // user regenerates. Show a friendly notice.
-            try {
-                const r = await fetch(`${API_URL}/resumes/structured/${currentEditingJobId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        structured_content: sc,
-                        current_content: plain,
-                    }),
-                });
-                if (r.ok) {
-                    job.structured_content = sc;
-                    job.generated_resume = plain;
-                    // Mirror into the textarea too
-                    document.getElementById('resume-editor-content').value = plain;
-                    const btn = document.getElementById('btn-apply-structured-edits');
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = '<i class="fas fa-check"></i> Saved';
-                    setTimeout(() => { btn.innerHTML = orig; }, 1500);
-                } else {
-                    alert('Failed to save structured edits (status ' + r.status + ').');
-                }
-            } catch (e) {
-                console.error('applyStructuredEdits failed:', e);
-                alert('Failed to save: ' + e.message);
-            }
-        }
-
+        // Open resume editor - plain text only (structured mode removed)
         window.openResumeEditor = function(jobId) {
             console.log('openResumeEditor called with jobId:', jobId);
             const job = jobs.find(j => j.id === jobId);
             console.log('Found job:', job ? 'yes' : 'no');
-            
+
             if (!job) {
                 console.log('No job found for id:', jobId);
                 alert('Job not found. Please refresh and try again.');
                 return;
             }
-            
+
             if (!job.generated_resume) {
                 console.log('No generated_resume');
                 alert('No generated resume found for this job. Please generate one first.');
@@ -2976,24 +2610,6 @@ The AI will automatically extract:
             // Handle both object and string formats for generated_resume
             const resumeContent = typeof job.generated_resume === 'object' ? job.generated_resume.content : job.generated_resume;
             document.getElementById('resume-editor-content').value = resumeContent || '';
-
-            // Pull structured content for this job (may be null if the resume
-            // was generated before template atoms existed, or in plain mode).
-            currentStructuredContent = job.structured_content
-                ? JSON.parse(JSON.stringify(job.structured_content))
-                : null;
-
-            // Decide which tab is the default: structured if we have
-            // structured content; plain text otherwise.
-            const hasStructured = currentStructuredContent
-                && Array.isArray(currentStructuredContent.atoms)
-                && currentStructuredContent.atoms.length > 0;
-            const atomsBadge = document.getElementById('resume-editor-atoms-badge');
-            if (atomsBadge) atomsBadge.style.display = hasStructured ? 'inline-flex' : 'none';
-            switchResumeEditorTab(hasStructured ? 'structured' : 'plain', /* skipRender */ true);
-            if (hasStructured) {
-                renderStructuredEditor(currentStructuredContent);
-            }
 
             // Populate version dropdown
             const versionSelect = document.getElementById('resume-version-select');
@@ -3045,14 +2661,14 @@ The AI will automatically extract:
             const editorModal = document.getElementById('resume-editor-modal');
             if (editorModal) {
                 editorModal.classList.add('active');
-                
+
                 // Set dropdown to saved model preference
                 const modelSelect = document.getElementById('resume-model-select');
                 if (modelSelect) {
                     const savedModel = localStorage.getItem('lastUsedResumeModel');
                     if (savedModel) modelSelect.value = savedModel;
                 }
-                
+
                 // Auto-select the latest version in the version dropdown
                 const versionSelect = document.getElementById('resume-version-select');
                 if (versionSelect && versionSelect.options.length > 0) {
@@ -3065,24 +2681,14 @@ The AI will automatically extract:
             }
         };
 
-        // Export resume to DOCX — now backed by the server-side composer
-        // which uses the user's template atoms for exact formatting fidelity.
+        // Export resume to DOCX - uses plain text from textarea
         async function exportResumeToDocx() {
             const job = jobs.find(j => j.id === currentEditingJobId);
             if (!job) return;
 
-            // If the user has made structured edits, apply them first so the
-            // export reflects what they see on screen.
-            let structuredContent = currentStructuredContent;
-            if (structuredContent && document.getElementById('resume-editor-structured').style.display !== 'none') {
-                _readStructuredEditor(); // updates currentStructuredContent in place
-                structuredContent = currentStructuredContent;
-            }
-
-            if (!structuredContent || !Array.isArray(structuredContent.atoms) || structuredContent.atoms.length === 0) {
-                // Fallback: if the textarea has plain text but no structured
-                // content, prompt the user to switch tabs / regenerate.
-                alert('No structured content available. Generate the resume first or click Regenerate to create structured content from your template.');
+            const plainText = document.getElementById('resume-editor-content').value;
+            if (!plainText || !plainText.trim()) {
+                alert('No resume content to export.');
                 return;
             }
 
@@ -3092,6 +2698,22 @@ The AI will automatically extract:
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Building DOCX...';
 
             try {
+                // Use the template atoms with plain text content
+                const structuredContent = { atoms: [] };
+                if (currentAtoms && currentAtoms.length > 0) {
+                    // Map plain text to atoms - simple line-by-line mapping
+                    const lines = plainText.split('\n').filter(l => l.trim());
+                    let atomIdx = 0;
+                    for (const line of lines) {
+                        const atomId = atomIdx < currentAtoms.length ? currentAtoms[atomIdx].id : 'body_para';
+                        structuredContent.atoms.push({
+                            atom_id: atomId,
+                            segments: [{ text: line }]
+                        });
+                        atomIdx++;
+                    }
+                }
+
                 const r = await apiFetch(`${API_URL}/resumes/compose-docx`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
