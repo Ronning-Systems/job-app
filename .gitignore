@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 backend/venv/
 mcp_server/venv/
+recordings/
