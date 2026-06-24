@@ -140,6 +140,8 @@ class JobResponse(BaseModel):
     keywords: Optional[list]
     generated_resume: Optional[str]
     resume_revisions: Optional[list] = []
+    structured_content: Optional[dict] = None
+    atoms_snapshot: Optional[list] = None
     created_at: datetime
 
     class Config:
@@ -154,8 +156,6 @@ class JobDetailResponse(JobResponse):
     required_credentials: Optional[list]
     history: Optional[list]
     generated_resume: Optional[str]
-    structured_content: Optional[dict] = None
-    atoms_snapshot: Optional[list] = None
 
 
 
