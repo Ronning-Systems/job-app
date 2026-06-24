@@ -1049,17 +1049,20 @@ The AI will automatically extract:
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-microchip"></i> Model:</span>
                         <select id="resume-model-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
+                            <!-- Ordered fastest → slowest by measured tokens/sec.
+                                 Defaults to qwen3.5:cloud as a sensible general-purpose choice. -->
                             <option value="">Default (qwen3.5:cloud)</option>
-                            <option value="qwen3.5:cloud">Qwen 3.5</option>
-                            <option value="minimax-m3:cloud">MiniMax M3</option>
-                            <option value="minimax-m2.5:cloud">MiniMax M2.5</option>
-                            <option value="kimi-k2.7-code:cloud">Kimi K2.7 Code</option>
-                            <option value="nemotron-3-ultra:cloud">Nemotron 3 Ultra</option>
-                            <option value="gemma4:31b-cloud">Gemma 4 31B</option>
-                            <option value="glm-5.1:cloud">GLM 5.1</option>
-                            <option value="deepseek-v4-flash:cloud">DeepSeek V4 Flash</option>
-                            <option value="gpt-oss:20b-cloud">GPT-OSS 20B</option>
-                            <option value="gpt-oss:120b-cloud">GPT-OSS 120B</option>
+                            <option value="deepseek-v4-flash:cloud">DeepSeek V4 Flash · 175 tok/s</option>
+                            <option value="ministral-3:3b-cloud">Ministral 3 3B · 111 tok/s</option>
+                            <option value="kimi-k2.7-code:cloud">Kimi K2.7 Code · 98 tok/s</option>
+                            <option value="qwen3.5:cloud">Qwen 3.5 · 84 tok/s</option>
+                            <option value="gpt-oss:20b-cloud">GPT-OSS 20B · 78 tok/s</option>
+                            <option value="gpt-oss:120b-cloud">GPT-OSS 120B · 77 tok/s</option>
+                            <option value="glm-5.1:cloud">GLM 5.1 · 67 tok/s</option>
+                            <option value="minimax-m2.5:cloud">MiniMax M2.5 · 64 tok/s</option>
+                            <option value="gemma3:12b-cloud">Gemma 3 12B · 38 tok/s</option>
+                            <option value="gemma4:31b-cloud">Gemma 4 31B · 27 tok/s</option>
+                            <option value="minimax-m3:cloud">MiniMax M3 · 18 tok/s</option>
                         </select>
                         <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
                         <select id="resume-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
@@ -1226,6 +1229,31 @@ The AI will automatically extract:
         let currentUser = null;
 
         // ─── Auth0 SDK Initialization ───
+        // Checks /api/health; if the backend reports auth_disabled=true, skip
+        // Auth0 entirely and load the app as a local-dev user. Otherwise the
+        // existing Auth0 login flow runs.
+        async function bootstrap() {
+            try {
+                const res = await fetch('/api/health');
+                const data = await res.json().catch(() => ({}));
+                if (data.auth_disabled) {
+                    currentUser = {
+                        sub: 'local-dev',
+                        name: 'Local Dev',
+                        email: 'dev@localhost',
+                        picture: '',
+                    };
+                    document.getElementById('auth-overlay').style.display = 'none';
+                    updateAuthUI();
+                    initApp();
+                    return;
+                }
+            } catch (err) {
+                console.warn('Health check failed, falling back to Auth0:', err);
+            }
+            await initAuth();
+        }
+
         async function initAuth() {
             try {
                 auth0Client = await window.auth0.createAuth0Client({
@@ -1307,19 +1335,18 @@ The AI will automatically extract:
 
         // ─── Authenticated Fetch Wrapper ───
         async function apiFetch(url, options = {}) {
-            if (!auth0Client) {
-                throw new Error('Auth0 not initialized');
+            if (auth0Client) {
+                const token = await auth0Client.getTokenSilently();
+                options.headers = {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`,
+                };
             }
-            const token = await auth0Client.getTokenSilently();
-            options.headers = {
-                ...options.headers,
-                'Authorization': `Bearer ${token}`,
-            };
 
             const response = await fetch(url, options);
 
-            // Handle 401 — try to refresh token
-            if (response.status === 401) {
+            // Handle 401 — try to refresh token (only when Auth0 is active)
+            if (response.status === 401 && auth0Client) {
                 try {
                     const newToken = await auth0Client.getTokenSilently();
                     options.headers['Authorization'] = `Bearer ${newToken}`;
@@ -3080,9 +3107,13 @@ The AI will automatically extract:
             }
 
             if (!structuredContent || !Array.isArray(structuredContent.atoms) || structuredContent.atoms.length === 0) {
-                // Fallback: if the textarea has plain text but no structured
-                // content, prompt the user to switch tabs / regenerate.
-                alert('No structured content available. Generate the resume first or click Regenerate to create structured content from your template.');
+                // Two distinct reasons for this gate, and the fix is different
+                // for each. Tell the user which one applies.
+                if (!resumeSettings || !resumeSettings.templateFile) {
+                    alert('No template configured. Upload a template DOCX in Resume Settings first to enable DOCX export.');
+                } else {
+                    alert('No structured content available. Click Regenerate to create structured content from your template.');
+                }
                 return;
             }
 
@@ -3136,9 +3167,9 @@ The AI will automatically extract:
         });
         } // end initApp()
 
-        // ─── Initialize Auth on Page Load ───
+        // ─── Initialize on Page Load ───
         document.addEventListener('DOMContentLoaded', () => {
-            initAuth();
+            bootstrap();
         });
     </script>
 </body>

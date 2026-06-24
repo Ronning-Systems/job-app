@@ -154,6 +154,8 @@ class JobDetailResponse(JobResponse):
     required_credentials: Optional[list]
     history: Optional[list]
     generated_resume: Optional[str]
+    structured_content: Optional[dict] = None
+    atoms_snapshot: Optional[list] = None
 
 
 
@@ -223,7 +225,7 @@ async def create_job(
     db.add(application)
     db.commit()
 
-    return format_job_response(job, application)
+    return format_job_response(job, application, db)
 
 
 @app.get("/api/jobs", response_model=List[JobResponse])
@@ -324,7 +326,7 @@ def update_job(job_id: int, update: JobUpdate, db: Session = Depends(get_db), cu
     application = (
         db.query(JobApplication).filter(JobApplication.job_id == job_id).first()
     )
-    return format_job_response(job, application)
+    return format_job_response(job, application, db)
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -648,7 +650,7 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
     db.refresh(application)
 
     job = db.query(Job).filter(Job.id == job_id).first()
-    return format_job_response(job, application)
+    return format_job_response(job, application, db)
 
 
 # In-memory tracking for background resume generation
@@ -1081,7 +1083,12 @@ async def revise_job_resume(
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "job-tracker-api"}
+    from auth import AUTH_DISABLED
+    return {
+        "status": "healthy",
+        "service": "job-tracker-api",
+        "auth_disabled": AUTH_DISABLED,
+    }
 
 
 @app.get("/api/health/ollama")

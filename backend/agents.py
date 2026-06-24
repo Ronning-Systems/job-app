@@ -356,7 +356,7 @@ Respond with ONLY a JSON object in this format:
                 target_role=target_role,
                 model_override=model_override,
             )
-        return await self._generate_resume_plain(
+        result = await self._generate_resume_plain(
             user_profile=user_profile,
             job_description=job_description,
             example_resumes=example_resumes,
@@ -364,6 +364,14 @@ Respond with ONLY a JSON object in this format:
             target_role=target_role,
             model_override=model_override,
         )
+        # Plain path returns no structured_content. Wrap the plain text so the
+        # DOCX export path has something to render. Uses default body_para
+        # atom when no template atoms are loaded.
+        if "structured_content" not in result and result.get("content"):
+            result["structured_content"] = _wrap_plain_text_as_structured(
+                result["content"], atoms or []
+            )
+        return result
 
     async def _generate_resume_plain(
         self,
@@ -660,7 +668,7 @@ Output the JSON now:"""
                 atoms=atoms,
                 target_role=target_role,
             )
-        return await self._revise_resume_plain(
+        result = await self._revise_resume_plain(
             current_resume=current_resume,
             feedback=feedback,
             job_description=job_description,
@@ -668,6 +676,13 @@ Output the JSON now:"""
             template=template,
             target_role=target_role,
         )
+        # Plain revision path returns no structured_content. Wrap it so the
+        # DOCX export path has something to render.
+        if "structured_content" not in result and result.get("content"):
+            result["structured_content"] = _wrap_plain_text_as_structured(
+                result["content"], atoms or []
+            )
+        return result
 
     async def _revise_resume_plain(
         self,
@@ -737,6 +752,10 @@ Output format: Plain text resume only. No JSON."""
             response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
             if not response:
                 raise Exception("Empty response from Ollama")
+            # Always emit structured_content so the DOCX export path has
+            # something to render, even when no template atoms are loaded.
+            # The helper uses a default body_para atom when `atoms` is empty,
+            # which yields an unstyled-but-renderable DOCX.
             return {"content": response.strip(), "mode": "plain"}
         except Exception as e:
             logger.info(f"[ResumeRevise/plain] Error: {e}")

@@ -25,21 +25,47 @@ log_step() { echo -e "${BLUE}→${NC} $1"; }
 # Check prerequisites
 log_step "Checking prerequisites..."
 
-if ! command -v python3 &> /dev/null; then
-    echo -e "\033[0;31m✗ Python 3 is not installed\033[0m"
+if ! command -v brew &> /dev/null; then
+    echo -e "\033[0;31m✗ Homebrew is required to install Python 3.12 on first run\033[0m"
+    echo -e "\033[0;31m  Install: https://brew.sh\033[0m"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
-log_info "Python version: $PYTHON_VERSION"
+# Ensure python3.12 is installed (pydantic-core 2.14.6 cannot build on 3.13+)
+if ! command -v python3.12 &> /dev/null; then
+    log_step "Installing Python 3.12 via Homebrew (one-time, ~3 min)..."
+    brew install python@3.12
+    log_info "Python 3.12 installed"
+else
+    log_info "Python 3.12 available"
+fi
 
-# Create virtual environment if it doesn't exist
+# Decide whether the existing venv needs to be recreated.
+# It needs recreating if: it doesn't exist, its Python binary is missing
+# (dangling symlink from a moved project), or its Python is 3.13+.
+RECREATE_VENV=0
+
 if [ ! -d "backend/venv" ]; then
-    log_step "Creating virtual environment..."
-    python3 -m venv backend/venv
+    RECREATE_VENV=1
+elif ! backend/venv/bin/python -c "import sys" &> /dev/null; then
+    log_warn "Existing venv is broken (Python binary missing) — will recreate"
+    RECREATE_VENV=1
+else
+    VENV_PY_MAJOR=$(backend/venv/bin/python -c "import sys; print(sys.version_info.major)")
+    VENV_PY_MINOR=$(backend/venv/bin/python -c "import sys; print(sys.version_info.minor)")
+    if [ "$VENV_PY_MAJOR" -gt 3 ] || { [ "$VENV_PY_MAJOR" -eq 3 ] && [ "$VENV_PY_MINOR" -gt 12 ]; }; then
+        log_warn "Existing venv uses Python $VENV_PY_MAJOR.$VENV_PY_MINOR (3.13+ not supported by pydantic-core 2.14.6) — will recreate with 3.12"
+        RECREATE_VENV=1
+    fi
+fi
+
+if [ "$RECREATE_VENV" -eq 1 ]; then
+    log_step "Creating virtual environment with Python 3.12..."
+    rm -rf backend/venv
+    python3.12 -m venv backend/venv
     log_info "Virtual environment created"
 else
-    log_info "Virtual environment already exists"
+    log_info "Virtual environment already exists and is compatible"
 fi
 
 # Activate virtual environment
@@ -89,6 +115,8 @@ echo ""
 # Set environment variables for local development
 export PYTHONPATH=/app/backend:$PYTHONPATH
 export PORT=$PORT
+# Skip Auth0 for local dev. Frontend reads /api/health to know to bypass.
+export AUTH_DISABLED=true
 
 # Run the server
 cd backend

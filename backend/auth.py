@@ -26,11 +26,19 @@ AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "https://jobsync/api")
 ALGORITHMS = ["RS256"]
 
+# Local-dev bypass. When AUTH_DISABLED is truthy, get_current_user returns a
+# single shared dev user without validating any token. Production must never
+# set this.
+AUTH_DISABLED = os.getenv("AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+DEV_USER_AUTH0_ID = "local-dev"
+
 # JWKS cache
 _jwks_cache = {"keys": None, "expires": 0}
 _JWKS_CACHE_TTL = 3600  # 1 hour
 
-security = HTTPBearer()
+# auto_error=False so requests without an Authorization header don't 403 when
+# auth is bypassed.
+security = HTTPBearer(auto_error=AUTH_DISABLED is False)
 
 
 def _get_jwks() -> list[dict]:
@@ -146,17 +154,28 @@ def verify_jwt(token: str) -> dict:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     """
     FastAPI dependency that extracts and validates the Bearer token,
     then looks up or creates the user in the database.
 
+    When AUTH_DISABLED is set, returns a single shared dev user
+    (auth0_id="local-dev") without validating any token.
+
     Handles race conditions: if two concurrent requests try to create
     the same user, the IntegrityError on the unique auth0_id constraint
     is caught and the existing user is returned instead.
     """
+    if AUTH_DISABLED:
+        return _get_or_create_dev_user(db)
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication credentials",
+        )
     token = credentials.credentials
     payload = verify_jwt(token)
 
@@ -205,5 +224,39 @@ def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create or find user",
+            )
+        return user
+
+
+def _get_or_create_dev_user(db: Session) -> User:
+    """Return the shared local-dev user, creating it on first request."""
+    from datetime import datetime
+
+    user = db.query(User).filter(User.auth0_id == DEV_USER_AUTH0_ID).first()
+    if user:
+        user.last_login = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+        return user
+
+    new_user = User(
+        auth0_id=DEV_USER_AUTH0_ID,
+        email="dev@localhost",
+        name="Local Dev",
+        avatar_url="",
+    )
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        logger.info("Auto-provisioned local-dev user (AUTH_DISABLED=true)")
+        return new_user
+    except IntegrityError:
+        db.rollback()
+        user = db.query(User).filter(User.auth0_id == DEV_USER_AUTH0_ID).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create or find dev user",
             )
         return user

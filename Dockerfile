@@ -15,8 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY agents/ ./agents/
 COPY static/ ./static/
-# Also copy root index.html for local dev fallback (prod serves from /static)
-COPY index.html ./index.html
 
 EXPOSE 8080
 
