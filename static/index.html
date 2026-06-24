@@ -1053,7 +1053,7 @@ The AI will automatically extract:
                                  Defaults to qwen3.5:cloud as a sensible general-purpose choice. -->
                             <option value="">Default (qwen3.5:cloud)</option>
                             <option value="deepseek-v4-flash:cloud">DeepSeek V4 Flash · 175 tok/s</option>
-                            <option value="ministral-3:3b-cloud">Ministral 3 3B · 111 tok/s</option>
+    
                             <option value="kimi-k2.7-code:cloud">Kimi K2.7 Code · 98 tok/s</option>
                             <option value="qwen3.5:cloud">Qwen 3.5 · 84 tok/s</option>
                             <option value="gpt-oss:20b-cloud">GPT-OSS 20B · 78 tok/s</option>
@@ -2834,7 +2834,7 @@ The AI will automatically extract:
             for (let idx = 0; idx < atoms.length; idx++) {
                 const a = atoms[idx];
                 a._idx = idx; // remember original index
-                const item = { idx, atom_id: a.atom_id, atom: a };
+                const item = { idx, atom_id: a.atom_id, text: a.text, segments: a.segments, atom: a };
 
                 if (a.atom_id === 'title') {
                     current = { label: 'Header', items: [] };
@@ -3009,12 +3009,15 @@ The AI will automatically extract:
             currentStructuredContent = job.structured_content
                 ? JSON.parse(JSON.stringify(job.structured_content))
                 : null;
+            console.log('[openResumeEditor] currentAtoms:', currentAtoms.length, 'currentStructuredContent:', currentStructuredContent ? 'present (' + currentStructuredContent.atoms.length + ' atoms)' : 'null');
 
-            // Decide which tab is the default: structured if we have atoms AND
-            // structured content; plain text otherwise.
-            const hasStructured = currentAtoms.length > 0 && currentStructuredContent
+            // Decide which tab is the default: structured if we have structured
+            // content; plain text otherwise. currentAtoms is used only for style
+            // metadata (font size, bold, etc.) and may still be loading.
+            const hasStructured = currentStructuredContent
                 && Array.isArray(currentStructuredContent.atoms)
                 && currentStructuredContent.atoms.length > 0;
+            console.log('[openResumeEditor] hasStructured:', hasStructured, 'currentAtoms.length:', currentAtoms.length, 'currentStructuredContent.atoms.length:', currentStructuredContent?.atoms?.length);
             const atomsBadge = document.getElementById('resume-editor-atoms-badge');
             if (atomsBadge) atomsBadge.style.display = hasStructured ? 'inline-flex' : 'none';
             switchResumeEditorTab(hasStructured ? 'structured' : 'plain', /* skipRender */ true);

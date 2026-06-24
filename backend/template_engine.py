@@ -777,13 +777,15 @@ def _build_paragraph(atom: Dict[str, Any], entry: Dict[str, Any]) -> etree._Elem
         pstyle = etree.SubElement(ppr, _w("pStyle"))
         pstyle.set(_w("val"), style_id)
 
-    # Numbering — only emit <w:numPr> when the atom has a real, positive
-    # num_id. The template often uses numId=0 as a "no list" sentinel
-    # (e.g., for the title row) and we must not propagate that into the
-    # composed document or it would try to reference an undefined list.
+    # Numbering — only emit <w:numPr> for bullet atoms that actually need
+    # list numbering. Section headers and other atom types may carry a
+    # positive num_id from template parsing (e.g. inherited from Heading
+    # styles), but they must never render as numbered list items.
+    atom_id = entry.get("atom_id", "")
     num_id = atom.get("num_id")
     num_ilvl = atom.get("num_ilvl")
-    if num_id is not None and int(num_id) > 0:
+    is_bullet = atom_id.startswith("bullet")
+    if is_bullet and num_id is not None and int(num_id) > 0:
         num_pr = etree.SubElement(ppr, _w("numPr"))
         ilvl_el = etree.SubElement(num_pr, _w("ilvl"))
         ilvl_el.set(_w("val"), str(num_ilvl if num_ilvl is not None else 0))
