@@ -105,7 +105,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --platform managed \
   --allow-unauthenticated \
   --add-cloudsql-instances "${DB_INSTANCE}" \
-  --set-env-vars "MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=gemma3:12b-cloud,MODEL_GENERATION_FALLBACK=rnj-1:8b-cloud,AUTH0_DOMAIN=dev-saxftot48835pavp.us.auth0.com,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://job-app-913142543866.us-west1.run.app" \
+  --set-env-vars "MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_GENERATION=qwen3.5:cloud,MODEL_GENERATION_FALLBACK=gemma3:12b-cloud,AUTH0_DOMAIN=dev-saxftot48835pavp.us.auth0.com,AUTH0_AUDIENCE=https://jobsync/api,CORS_ORIGIN=https://job-app-913142543866.us-west1.run.app" \
   --set-secrets "DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest" \
   --no-traffic
 
