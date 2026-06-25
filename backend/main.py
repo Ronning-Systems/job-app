@@ -1166,12 +1166,13 @@ def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_cu
 
     # Active = saved, applied, phone_screen, interview, executive_call, offered
     active_stages = ["saved", "applied", "phone_screen", "interview", "executive_call", "offered"]
+    archived_stages = ["rejected", "withdrawn", "closed", "not_pursuing"]
     stats["active"] = sum(stats["by_stage"].get(s, 0) for s in active_stages)
     stats["interviews"] = stats["by_stage"].get("interview", 0) + stats["by_stage"].get(
         "executive_call", 0
     )
     stats["offers"] = stats["by_stage"].get("offered", 0)
-    stats["not_pursuing"] = stats["by_stage"].get("not_pursuing", 0)
+    stats["archived"] = sum(stats["by_stage"].get(s, 0) for s in archived_stages)
 
     return stats
 

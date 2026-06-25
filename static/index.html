@@ -71,6 +71,19 @@
             padding: 16px 24px;
             border-radius: 12px;
             min-width: 120px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+            text-align: center;
+        }
+
+        .stat:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .stat.active {
+            background: rgba(255,255,255,0.25);
+            border-color: rgba(255,255,255,0.5);
         }
 
         .stat-value {
@@ -721,22 +734,26 @@
             <h1><i class="fas fa-briefcase"></i> JobSync</h1>
             <p>Track your job applications and stay organized</p>
             <div class="auth-container" id="auth-container"></div>
-            <div class="stats">
-                <div class="stat">
+            <div class="stats" id="stats-bar">
+                <div class="stat" data-filter="all" role="button" tabindex="0">
                     <span class="stat-value" id="stat-total">12</span>
                     <span class="stat-label">Total</span>
                 </div>
-                <div class="stat">
+                <div class="stat" data-filter="active" role="button" tabindex="0">
                     <span class="stat-value" id="stat-active">8</span>
                     <span class="stat-label">Active</span>
                 </div>
-                <div class="stat">
+                <div class="stat" data-filter="interview" role="button" tabindex="0">
                     <span class="stat-value" id="stat-interviews">3</span>
                     <span class="stat-label">Interviews</span>
                 </div>
-                <div class="stat">
+                <div class="stat" data-filter="offer" role="button" tabindex="0">
                     <span class="stat-value" id="stat-offers">1</span>
                     <span class="stat-label">Offers</span>
+                </div>
+                <div class="stat" data-filter="archived" role="button" tabindex="0">
+                    <span class="stat-value" id="stat-archived">0</span>
+                    <span class="stat-label">Closed</span>
                 </div>
             </div>
         </div>
@@ -745,13 +762,6 @@
     <!-- Main Content -->
     <div class="container">
         <div class="action-bar">
-            <div class="tabs">
-                <button class="tab active" data-filter="all">All</button>
-                <button class="tab" data-filter="active">Active</button>
-                <button class="tab" data-filter="interview">Interviewing</button>
-                <button class="tab" data-filter="offer">Offers</button>
-                <button class="tab" data-filter="archived">Archived</button>
-            </div>
             <div style="display: flex; gap: 12px; align-items: center;">
                 <button class="btn btn-secondary" id="btn-resume-settings" title="Resume Settings">
                     <i class="fas fa-cog"></i> Resume Settings
@@ -1590,6 +1600,7 @@ The AI will automatically extract:
                 document.getElementById('stat-active').textContent = stats.active || 0;
                 document.getElementById('stat-interviews').textContent = stats.interviews || 0;
                 document.getElementById('stat-offers').textContent = stats.offers || 0;
+                document.getElementById('stat-archived').textContent = stats.archived || 0;
             } catch (error) {
                 console.error('Error fetching stats:', error);
             }
@@ -2140,15 +2151,25 @@ The AI will automatically extract:
             }
         });
 
-        // Tab filtering
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                currentFilter = tab.dataset.filter;
-                renderJobs();
+        // Filter via stats bar
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.stat[data-filter]').forEach(s => s.classList.toggle('active', s.dataset.filter === filter));
+            renderJobs();
+        }
+
+        document.querySelectorAll('.stat[data-filter]').forEach(statEl => {
+            statEl.addEventListener('click', () => setFilter(statEl.dataset.filter));
+            statEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setFilter(statEl.dataset.filter);
+                }
             });
         });
+
+        // Initial highlight
+        setFilter(currentFilter);
 
         // Close modals on overlay click
         jobModal.addEventListener('click', (e) => {
