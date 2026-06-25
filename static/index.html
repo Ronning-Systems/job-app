@@ -1158,6 +1158,15 @@ The AI will automatically extract:
             return resumeSettings.defaultModel || DEFAULT_MODEL;
         }
 
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+        function escapeAttr(s) {
+            return escapeHtml(s);
+        }
+
         let currentEditingJobId = null;
 
         // ---------- Structured-resume state ---------------------------------
@@ -3119,15 +3128,6 @@ The AI will automatically extract:
             }
             // Drop empty sections
             return sections.filter(s => s.items.length > 0);
-        }
-
-        function escapeHtml(s) {
-            return String(s).replace(/[&<>"']/g, c => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            }[c]));
-        }
-        function escapeAttr(s) {
-            return escapeHtml(s);
         }
 
         // Read the current structured editor state back into a fresh
