@@ -768,9 +768,39 @@ def compose_docx(
         else:
             body.append(para_el)
 
+    # Strip auto-numbering from Heading styles in the template's styles.xml.
+    # Otherwise header/footer paragraphs that use Heading1/Heading2 inherit
+    # numbering from the style definition even when we emit numId=0 locally.
+    _suppress_heading_style_numbering(doc)
+
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def _suppress_heading_style_numbering(doc: Document) -> None:
+    """Remove <w:numPr> from Heading* styles so paragraphs using those styles
+    (including header/footer paragraphs) are not auto-numbered by Word.
+    Only explicit paragraph-level numPr (for bullets) should drive numbering.
+    """
+    try:
+        styles_part = doc.part.styles_part
+        if styles_part is None:
+            return
+        styles_el = styles_part.element
+        for style in styles_el.findall(_w("style")):
+            style_id = style.get(_w("styleId")) or ""
+            if not style_id.startswith("Heading"):
+                continue
+            ppr = style.find(_w("pPr"))
+            if ppr is None:
+                continue
+            num_pr = ppr.find(_w("numPr"))
+            if num_pr is not None:
+                ppr.remove(num_pr)
+                logger.debug(f"Removed numPr from style {style_id}")
+    except Exception as e:
+        logger.warning(f"Could not suppress heading style numbering: {e}")
 
 
 def _build_paragraph(atom: Dict[str, Any], entry: Dict[str, Any]) -> etree._Element:
