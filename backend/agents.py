@@ -105,8 +105,13 @@ class OllamaAgent:
 
     async def generate(
         self, prompt: str, system: Optional[str] = None, temperature: float = 0.3, model: Optional[str] = None
-    ) -> str:
-        """Generate text using Ollama (local or cloud) with optional fallback."""
+    ) -> Dict[str, str]:
+        """Generate text using Ollama (local or cloud) with optional fallback.
+
+        Returns a dict with keys:
+          - content: the generated text
+          - model: the actual model that produced it (may be the fallback)
+        """
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -145,10 +150,12 @@ class OllamaAgent:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                if self.is_cloud:
-                    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                else:
-                    return data.get("response", "")
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if self.is_cloud
+                    else data.get("response", "")
+                )
+                return {"content": content, "model": model_to_use}
             except Exception as e:
                 # Try fallback model if configured
                 if self.generation_model_fallback and model_to_use != self.generation_model_fallback:
@@ -157,10 +164,12 @@ class OllamaAgent:
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     data = response.json()
-                    if self.is_cloud:
-                        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    else:
-                        return data.get("response", "")
+                    content = (
+                        data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if self.is_cloud
+                        else data.get("response", "")
+                    )
+                    return {"content": content, "model": self.generation_model_fallback}
                 raise
 
 
@@ -229,7 +238,7 @@ Respond with ONLY a JSON object in this format:
 
         try:
             response = await self.ollama.generate(prompt, temperature=0.3)
-            response = response.strip()
+            response = response.get("content", "").strip()
 
             # Extract JSON from response
             if "```json" in response:
@@ -300,7 +309,7 @@ Respond with ONLY a JSON object in this format:
 
         try:
             response = await self.ollama.generate(prompt, temperature=0.3)
-            response = response.strip()
+            response = response.get("content", "").strip()
 
             if "```json" in response:
                 response = response.split("```json")[1].split("```")[0]
@@ -471,11 +480,12 @@ Output format: Plain text resume only. No JSON needed. Include ALL positions and
         try:
             model = model_override or self.ollama.generation_model
             logger.info(f"[ResumeGenerator/plain] Using model: {model}")
-            response = await self.ollama.generate(prompt, temperature=0.7, model=model)
+            ollama_result = await self.ollama.generate(prompt, temperature=0.7, model=model)
+            response = ollama_result.get("content", "")
             logger.info(f"[ResumeGenerator/plain] Raw response length: {len(response)}")
             if not response:
                 raise Exception("Empty response from Ollama")
-            return {"content": response.strip(), "mode": "plain"}
+            return {"content": response.strip(), "mode": "plain", "model_used": ollama_result.get("model", model)}
         except Exception as e:
             logger.info(f"[ResumeGenerator/plain] Error: {e}")
             return {"error": str(e), "content": f"Error generating resume: {str(e)}"}
@@ -603,9 +613,10 @@ Output the JSON now:"""
         try:
             model = model_override or self.ollama.generation_model
             logger.info(f"[ResumeGenerator/structured] Using model: {model}")
-            response = await self.ollama.generate(
+            ollama_result = await self.ollama.generate(
                 prompt, system=system, temperature=0.4, model=model
             )
+            response = ollama_result.get("content", "")
             logger.info(f"[ResumeGenerator/structured] Raw response length: {len(response)}")
 
             if not response:
@@ -620,6 +631,7 @@ Output the JSON now:"""
                     "mode": "structured_fallback",
                     "structured_content": _wrap_plain_text_as_structured(response, atoms),
                     "content": response.strip(),
+                    "model_used": ollama_result.get("model", model),
                 }
             # Validate basic shape; reject if it's clearly broken
             if not isinstance(parsed, dict) or "atoms" not in parsed or not isinstance(parsed["atoms"], list):
@@ -630,11 +642,13 @@ Output the JSON now:"""
                     "mode": "structured_fallback",
                     "structured_content": _wrap_plain_text_as_structured(response, atoms),
                     "content": response.strip(),
+                    "model_used": ollama_result.get("model", model),
                 }
             return {
                 "mode": "structured",
                 "structured_content": parsed,
                 "content": _structured_to_plain_text(parsed),
+                "model_used": ollama_result.get("model", model),
             }
         except Exception as e:
             logger.info(f"[ResumeGenerator/structured] Error: {e}")
@@ -749,14 +763,15 @@ CRITICAL INSTRUCTIONS:
 Output format: Plain text resume only. No JSON."""
 
         try:
-            response = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            ollama_result = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            response = ollama_result.get("content", "")
             if not response:
                 raise Exception("Empty response from Ollama")
             # Always emit structured_content so the DOCX export path has
             # something to render, even when no template atoms are loaded.
             # The helper uses a default body_para atom when `atoms` is empty,
             # which yields an unstyled-but-renderable DOCX.
-            return {"content": response.strip(), "mode": "plain"}
+            return {"content": response.strip(), "mode": "plain", "model_used": ollama_result.get("model", self.ollama.generation_model)}
         except Exception as e:
             logger.info(f"[ResumeRevise/plain] Error: {e}")
             return {"error": str(e), "content": f"Error revising resume: {str(e)}"}
@@ -844,9 +859,10 @@ RULES:
 Output the JSON now:"""
 
         try:
-            response = await self.ollama.generate(
+            ollama_result = await self.ollama.generate(
                 prompt, system=system, temperature=0.4, model=self.ollama.generation_model
             )
+            response = ollama_result.get("content", "")
             if not response:
                 raise Exception("Empty response from Ollama")
             parsed = _extract_json(response)
@@ -856,11 +872,13 @@ Output the JSON now:"""
                     "mode": "structured_fallback",
                     "structured_content": _wrap_plain_text_as_structured(response, atoms),
                     "content": response.strip(),
+                    "model_used": ollama_result.get("model", self.ollama.generation_model),
                 }
             return {
                 "mode": "structured",
                 "structured_content": parsed,
                 "content": _structured_to_plain_text(parsed),
+                "model_used": ollama_result.get("model", self.ollama.generation_model),
             }
         except Exception as e:
             logger.info(f"[ResumeRevise/structured] Error: {e}")

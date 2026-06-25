@@ -690,7 +690,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                 GeneratedResume.job_id == job_id
             ).order_by(GeneratedResume.updated_at.desc()).first()
 
-            model_label = model_override or "qwen3.5:cloud"
+            model_label = resume_result.get("model_used") or model_override or "qwen3.5:cloud"
 
             if existing_resume:
                 # Coerce revisions into a plain list (JSON columns may round-trip as a custom type)
@@ -1045,7 +1045,7 @@ async def revise_job_resume(
             if r["version"] > max_version:
                 max_version = r["version"]
     next_version = max_version + 1 if max_version else len(revisions) + 1
-    model_used = os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "kimi-k2.5:cloud")
+    model_used = resume_result.get("model_used") or os.getenv("MODEL_GENERATION") or os.getenv("MODEL_AGENTS", "qwen3.5:cloud")
     new_revision = {
         "version": next_version,
         "content": resume_content,
@@ -1094,7 +1094,7 @@ async def health_check():
 @app.get("/api/health/ollama")
 async def ollama_health_check():
     """Check if Ollama is accessible"""
-    ollama_url = os.getenv("MODEL_ENPOINT", "http://localhost:11434").rstrip("/")
+    ollama_url = os.getenv("MODEL_ENDPOINT", "http://localhost:11434").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{ollama_url}/api/tags")
