@@ -493,6 +493,13 @@ def _atom_from_paragraph(
     align = _resolve_alignment(ppr)
     num_id, num_ilvl = _resolve_numbering(ppr)
 
+    # Strip list numbering from non-bullet atoms at parse time. Some templates
+    # attach Heading styles to list definitions; we never want section_header
+    # or role_title paragraphs to carry a num_id into the composer.
+    if not atom_id.startswith("bullet"):
+        num_id = None
+        num_ilvl = None
+
     # Run-level: capture the first run's formatting as a representative
     # sample (paragraphs in the template usually have uniform run formatting
     # for atoms like title/role_title/section_header; bullets/role_lines have
@@ -781,6 +788,10 @@ def _build_paragraph(atom: Dict[str, Any], entry: Dict[str, Any]) -> etree._Elem
     # list numbering. Section headers and other atom types may carry a
     # positive num_id from template parsing (e.g. inherited from Heading
     # styles), but they must never render as numbered list items.
+    #
+    # For non-bullets we explicitly emit <w:numPr><w:numId w:val="0"/></w:numPr>
+    # so that any numbering baked into the paragraph style itself is
+    # suppressed (numId=0 is Word's "no list" sentinel).
     atom_id = entry.get("atom_id", "")
     num_id = atom.get("num_id")
     num_ilvl = atom.get("num_ilvl")
@@ -791,6 +802,10 @@ def _build_paragraph(atom: Dict[str, Any], entry: Dict[str, Any]) -> etree._Elem
         ilvl_el.set(_w("val"), str(num_ilvl if num_ilvl is not None else 0))
         num_id_el = etree.SubElement(num_pr, _w("numId"))
         num_id_el.set(_w("val"), str(int(num_id)))
+    else:
+        num_pr = etree.SubElement(ppr, _w("numPr"))
+        num_id_el = etree.SubElement(num_pr, _w("numId"))
+        num_id_el.set(_w("val"), "0")
 
     # Spacing — only set explicit values if the atom defines them; otherwise
     # let the style cascade handle it.
