@@ -14,6 +14,7 @@ import logging
 import httpx
 import base64
 import io
+import time
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
@@ -111,6 +112,7 @@ class OllamaAgent:
         Returns a dict with keys:
           - content: the generated text
           - model: the actual model that produced it (may be the fallback)
+          - duration_ms: round-trip time for the LLM call
         """
         headers = {}
         if self.api_key:
@@ -147,29 +149,35 @@ class OllamaAgent:
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
+                start = time.monotonic()
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
+                duration_ms = int((time.monotonic() - start) * 1000)
                 content = (
                     data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if self.is_cloud
                     else data.get("response", "")
                 )
-                return {"content": content, "model": model_to_use}
+                logger.info(f"[ollama] {model_to_use} response: {len(content)} chars in {duration_ms}ms")
+                return {"content": content, "model": model_to_use, "duration_ms": duration_ms}
             except Exception as e:
                 # Try fallback model if configured
                 if self.generation_model_fallback and model_to_use != self.generation_model_fallback:
                     logger.warning(f"Model {model_to_use} failed ({e}), trying fallback: {self.generation_model_fallback}")
                     payload["model"] = self.generation_model_fallback
+                    start = time.monotonic()
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     data = response.json()
+                    duration_ms = int((time.monotonic() - start) * 1000)
                     content = (
                         data.get("choices", [{}])[0].get("message", {}).get("content", "")
                         if self.is_cloud
                         else data.get("response", "")
                     )
-                    return {"content": content, "model": self.generation_model_fallback}
+                    logger.info(f"[ollama] {self.generation_model_fallback} fallback response: {len(content)} chars in {duration_ms}ms")
+                    return {"content": content, "model": self.generation_model_fallback, "duration_ms": duration_ms}
                 raise
 
 
@@ -477,17 +485,20 @@ Job Description (use ONLY to tailor wording, not to invent experience):
 
 Output format: Plain text resume only. No JSON needed. Include ALL positions and ALL education."""
 
+        start = time.monotonic()
         try:
             model = model_override or self.ollama.generation_model
             logger.info(f"[ResumeGenerator/plain] Using model: {model}")
             ollama_result = await self.ollama.generate(prompt, temperature=0.7, model=model)
             response = ollama_result.get("content", "")
-            logger.info(f"[ResumeGenerator/plain] Raw response length: {len(response)}")
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.info(f"[ResumeGenerator/plain] Raw response length: {len(response)}, total path: {duration_ms}ms")
             if not response:
                 raise Exception("Empty response from Ollama")
-            return {"content": response.strip(), "mode": "plain", "model_used": ollama_result.get("model", model)}
+            return {"content": response.strip(), "mode": "plain", "model_used": ollama_result.get("model", model), "llm_duration_ms": ollama_result.get("duration_ms")}
         except Exception as e:
-            logger.info(f"[ResumeGenerator/plain] Error: {e}")
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.info(f"[ResumeGenerator/plain] Error after {duration_ms}ms: {e}")
             return {"error": str(e), "content": f"Error generating resume: {str(e)}"}
 
     async def _generate_resume_structured(
@@ -610,6 +621,7 @@ ATOM PURPOSES:
 
 Output the JSON now:"""
 
+        start = time.monotonic()
         try:
             model = model_override or self.ollama.generation_model
             logger.info(f"[ResumeGenerator/structured] Using model: {model}")
@@ -617,12 +629,16 @@ Output the JSON now:"""
                 prompt, system=system, temperature=0.4, model=model
             )
             response = ollama_result.get("content", "")
-            logger.info(f"[ResumeGenerator/structured] Raw response length: {len(response)}")
 
             if not response:
                 raise Exception("Empty response from Ollama")
 
+            json_start = time.monotonic()
             parsed = _extract_json(response)
+            json_ms = int((time.monotonic() - json_start) * 1000)
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.info(f"[ResumeGenerator/structured] Raw response length: {len(response)}, JSON parse: {json_ms}ms, total path: {duration_ms}ms")
+
             if parsed is None:
                 logger.warning(
                     f"[ResumeGenerator/structured] Could not parse JSON; falling back to text wrap. Response: {response[:500]}"
@@ -632,6 +648,7 @@ Output the JSON now:"""
                     "structured_content": _wrap_plain_text_as_structured(response, atoms),
                     "content": response.strip(),
                     "model_used": ollama_result.get("model", model),
+                    "llm_duration_ms": ollama_result.get("duration_ms"),
                 }
             # Validate basic shape; reject if it's clearly broken
             if not isinstance(parsed, dict) or "atoms" not in parsed or not isinstance(parsed["atoms"], list):
@@ -643,15 +660,18 @@ Output the JSON now:"""
                     "structured_content": _wrap_plain_text_as_structured(response, atoms),
                     "content": response.strip(),
                     "model_used": ollama_result.get("model", model),
+                    "llm_duration_ms": ollama_result.get("duration_ms"),
                 }
             return {
                 "mode": "structured",
                 "structured_content": parsed,
                 "content": _structured_to_plain_text(parsed),
                 "model_used": ollama_result.get("model", model),
+                "llm_duration_ms": ollama_result.get("duration_ms"),
             }
         except Exception as e:
-            logger.info(f"[ResumeGenerator/structured] Error: {e}")
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.info(f"[ResumeGenerator/structured] Error after {duration_ms}ms: {e}")
             return {"error": str(e), "content": f"Error generating resume: {str(e)}"}
 
     async def revise_resume(

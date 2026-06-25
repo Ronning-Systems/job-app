@@ -657,15 +657,34 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
 _generation_status = {}  # {job_id: {"status": "processing"|"completed"|"error", "error": str, "version": int, "resume_id": int}}
 
 
+def _set_generation_status(job_id: int, status: str, **kwargs):
+    """Thread-safe helper to update the in-memory generation status."""
+    _generation_status[job_id] = {
+        "status": status,
+        "updated_at": datetime.utcnow().isoformat(),
+        **kwargs,
+    }
+
+
+def _progress(job_id: int, step: str, percent: int):
+    """Post a progress update for a running generation."""
+    _set_generation_status(job_id, "processing", step=step, percent=percent)
+    logger.info(f"[generate-resume-progress] job_id={job_id} step={step} percent={percent}")
+
+
 def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str, atoms: Optional[list] = None):
     """Run resume generation in a background thread, store result in DB and update status dict."""
     from sqlalchemy.orm.attributes import flag_modified
+    import time
+    overall_start = time.monotonic()
     try:
-        _generation_status[job_id] = {"status": "processing"}
+        _progress(job_id, "Preparing inputs", 5)
         # Run the async agent in a new event loop (NO DB session held during generation)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            _progress(job_id, "Generating resume content", 25)
+            gen_start = time.monotonic()
             resume_result = loop.run_until_complete(
                 agent_service.generate_resume(
                     user_profile={},
@@ -677,19 +696,20 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                     atoms=atoms,
                 )
             )
+            gen_ms = int((time.monotonic() - gen_start) * 1000)
+            llm_ms = resume_result.get("llm_duration_ms")
+            logger.info(f"[generate-resume-bg] job_id={job_id} agent path: {gen_ms}ms (LLM call: {llm_ms}ms)")
+            _progress(job_id, "Processing generated content", 65)
         finally:
             loop.close()
 
         resume_content = resume_result.get("content", _json.dumps(resume_result))
         structured_content = resume_result.get("structured_content")  # may be None
 
+        _progress(job_id, "Saving resume revision", 85)
         # Now open a DB session ONLY to save the result (short-lived)
         db = SessionLocal()
         try:
-            existing_resume = db.query(GeneratedResume).filter(
-                GeneratedResume.job_id == job_id
-            ).order_by(GeneratedResume.updated_at.desc()).first()
-
             model_label = resume_result.get("model_used") or model_override or "qwen3.5:cloud"
 
             if existing_resume:
@@ -794,24 +814,30 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
                             empty += 1
                     empty_ratio = empty / len(atoms_list)
 
-            _generation_status[job_id] = {
-                "status": "completed",
-                "resume_id": generated_resume.id,
-                "version": len(generated_resume.revisions) if generated_resume.revisions else 1,
-                "mode": resume_result.get("mode", "plain"),
-                "structured_empty_ratio": round(empty_ratio, 3),
-            }
+            total_ms = int((time.monotonic() - overall_start) * 1000)
+            _set_generation_status(
+                job_id,
+                "completed",
+                resume_id=generated_resume.id,
+                version=len(generated_resume.revisions) if generated_resume.revisions else 1,
+                mode=resume_result.get("mode", "plain"),
+                structured_empty_ratio=round(empty_ratio, 3),
+                step="Done",
+                percent=100,
+            )
             logger.info(
                 f"[generate-resume-bg] Completed job {job_id}: "
                 f"mode={resume_result.get('mode')}, "
                 f"structured_content atoms={len(structured_content.get('atoms', [])) if structured_content else 0}, "
-                f"empty_ratio={round(empty_ratio, 3)}"
+                f"empty_ratio={round(empty_ratio, 3)}, "
+                f"total_time_ms={total_ms}, "
+                f"llm_time_ms={resume_result.get('llm_duration_ms', 'n/a')}"
             )
         finally:
             db.close()
     except Exception as e:
         logger.error(f"[generate-resume-bg] Error for job {job_id}: {e}", exc_info=True)
-        _generation_status[job_id] = {"status": "error", "error": str(e)}
+        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
 
 
 @app.post("/api/jobs/{job_id}/generate-resume")
@@ -915,7 +941,7 @@ async def generate_job_resume(
     logger.info(f"[generate-resume] Using model: {actual_model} (override={model_override})")
 
     # Launch background generation
-    _generation_status[job_id] = {"status": "processing"}
+    _set_generation_status(job_id, "processing", step="Queued", percent=0)
     background_tasks.add_task(
         _do_generate_resume,
         job_id=job_id,
@@ -969,10 +995,17 @@ async def get_generate_resume_status(
                 "atoms_snapshot": latest.atoms_snapshot,
                 "mode": status.get("mode", "plain"),
                 "structured_empty_ratio": status.get("structured_empty_ratio", 0.0),
+                "step": status.get("step", "Done"),
+                "percent": status.get("percent", 100),
             }
-        return {"status": "completed", "job_id": job_id, "resume": None}
+        return {"status": "completed", "job_id": job_id, "resume": None, "step": "Done", "percent": 100}
 
-    return {"status": status.get("status", "unknown"), "error": status.get("error")}
+    return {
+        "status": status.get("status", "unknown"),
+        "error": status.get("error"),
+        "step": status.get("step"),
+        "percent": status.get("percent"),
+    }
 
 
 @app.post("/api/jobs/{job_id}/revise-resume")

@@ -756,6 +756,10 @@
                 <button class="btn btn-secondary" id="btn-resume-settings" title="Resume Settings">
                     <i class="fas fa-cog"></i> Resume Settings
                 </button>
+                <button class="btn btn-secondary" id="btn-notifications" title="Notifications" style="position: relative;">
+                    <i class="fas fa-bell"></i>
+                    <span id="notification-badge" style="display: none; position: absolute; top: -6px; right: -6px; background: var(--danger); color: white; border-radius: 10px; padding: 1px 6px; font-size: 0.7rem; font-weight: 600;">0</span>
+                </button>
                 <button class="btn btn-primary" id="btn-add-job">
                     <i class="fas fa-plus"></i> Add Job to Tracker
                 </button>
@@ -788,6 +792,27 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Notification Dropdown Panel -->
+    <div id="notification-panel" style="display: none; position: fixed; top: 70px; right: 24px; width: 340px; max-height: 420px; background: white; border: 1px solid var(--gray-200); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); z-index: 2001; overflow: hidden; flex-direction: column;">
+        <div style="padding: 12px 16px; border-bottom: 1px solid var(--gray-200); display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 0.95rem; color: var(--gray-800);">Notifications</strong>
+            <button type="button" id="btn-clear-notifications" style="background: none; border: none; color: var(--info); font-size: 0.8rem; cursor: pointer;">Clear all</button>
+        </div>
+        <div id="notification-list" style="overflow-y: auto; padding: 8px 0; flex: 1;">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <!-- Active Generation Progress Panel -->
+    <div id="generation-progress-panel" style="display: none; position: fixed; bottom: 24px; right: 24px; width: 320px; background: white; border: 1px solid var(--gray-200); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); z-index: 1999; flex-direction: column; overflow: hidden;">
+        <div style="padding: 12px 16px; border-bottom: 1px solid var(--gray-200); background: var(--gray-50);">
+            <strong style="font-size: 0.9rem; color: var(--gray-800);"><i class="fas fa-sync-alt fa-spin" style="margin-right: 6px;"></i> Generating Resumes</strong>
+        </div>
+        <div id="generation-progress-list" style="padding: 8px 0; max-height: 240px; overflow-y: auto;">
+            <!-- Populated by JS -->
         </div>
     </div>
 
@@ -1144,6 +1169,123 @@ The AI will automatically extract:
         let currentStructuredContent = null;
         // Pending template upload: {name, contentB64, parseResult}
         let pendingTemplate = null;
+
+        // ---------- Generation progress + notifications ---------------------
+        // Active generations keyed by jobId. Each entry: {jobId, company, position, step, percent, status}.
+        let activeGenerations = new Map();
+        // Notifications for completed generations not yet viewed. Each entry:
+        // {id, jobId, company, position, version, model, timestamp, viewed}.
+        let notifications = JSON.parse(localStorage.getItem('jobSyncNotifications')) || [];
+
+        function persistNotifications() {
+            localStorage.setItem('jobSyncNotifications', JSON.stringify(notifications));
+        }
+
+        function addNotification(notification) {
+            // Avoid duplicates for the same job+version.
+            const exists = notifications.some(n => n.jobId === notification.jobId && n.version === notification.version);
+            if (exists) return;
+            notifications.unshift(notification);
+            persistNotifications();
+            renderNotifications();
+        }
+
+        function markNotificationsViewedForJob(jobId) {
+            let changed = false;
+            for (const n of notifications) {
+                if (n.jobId === jobId && !n.viewed) {
+                    n.viewed = true;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                persistNotifications();
+                renderNotifications();
+            }
+        }
+
+        function clearNotifications() {
+            notifications = [];
+            persistNotifications();
+            renderNotifications();
+        }
+
+        function renderNotifications() {
+            const badge = document.getElementById('notification-badge');
+            const list = document.getElementById('notification-list');
+            const unread = notifications.filter(n => !n.viewed).length;
+            if (badge) {
+                badge.textContent = String(unread);
+                badge.style.display = unread > 0 ? 'inline-block' : 'none';
+            }
+            if (!list) return;
+            if (notifications.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align: center; padding: 24px 16px; color: var(--gray-500); font-size: 0.9rem;">
+                        No notifications yet.
+                    </div>`;
+                return;
+            }
+            list.innerHTML = notifications.map(n => {
+                const job = jobs.find(j => j.id === n.jobId);
+                const label = job ? `${job.position} at ${job.company}` : `Job ${n.jobId}`;
+                return `
+                    <div class="notification-item ${n.viewed ? 'viewed' : 'unread'}" data-job-id="${n.jobId}"
+                         style="padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; ${n.viewed ? 'background: white;' : 'background: var(--info-50);'}">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="font-size: 0.85rem; color: var(--gray-800); font-weight: ${n.viewed ? '400' : '600'};">Resume ready</div>
+                            <div style="font-size: 0.7rem; color: var(--gray-500);">${new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)} — v${n.version}</div>
+                    </div>`;
+            }).join('');
+
+            list.querySelectorAll('.notification-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const jobId = parseInt(item.dataset.jobId);
+                    markNotificationsViewedForJob(jobId);
+                    openResumeEditor(jobId);
+                    document.getElementById('notification-panel').style.display = 'none';
+                });
+            });
+        }
+
+        function renderGenerationProgress() {
+            const panel = document.getElementById('generation-progress-panel');
+            const list = document.getElementById('generation-progress-list');
+            const entries = Array.from(activeGenerations.values());
+            if (entries.length === 0) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'flex';
+            list.innerHTML = entries.map(g => `
+                <div style="padding: 8px 16px; border-bottom: 1px solid var(--gray-100);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <div style="font-size: 0.8rem; color: var(--gray-800); font-weight: 500;">${escapeHtml(g.position)} at ${escapeHtml(g.company)}</div>
+                        <div style="font-size: 0.7rem; color: var(--gray-500);">${g.percent}%</div>
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--gray-600); margin-bottom: 5px;">${escapeHtml(g.step)}</div>
+                    <div style="height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden;">
+                        <div style="height: 100%; width: ${g.percent}%; background: var(--primary); transition: width 0.3s;"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function setGenerationStatus(jobId, status, step, percent) {
+            const g = activeGenerations.get(jobId);
+            if (!g) return;
+            g.status = status;
+            g.step = step;
+            g.percent = percent;
+            renderGenerationProgress();
+        }
+
+        function removeActiveGeneration(jobId) {
+            activeGenerations.delete(jobId);
+            renderGenerationProgress();
+        }
 
         // Sample data
         let jobs = [
@@ -1987,6 +2129,11 @@ The AI will automatically extract:
             fetchStats();
             loadResumeSettingsFromDB();
 
+            // Render any saved notifications and ensure the progress panel is
+            // in the right initial state.
+            renderNotifications();
+            renderGenerationProgress();
+
             // ============================================
             // RESUME GENERATION FUNCTIONALITY
             // ============================================
@@ -2012,6 +2159,24 @@ The AI will automatically extract:
 
         document.getElementById('btn-clear-default-model').addEventListener('click', () => {
             document.getElementById('resume-settings-default-model').value = '';
+        });
+
+        // Notifications
+        const notificationPanel = document.getElementById('notification-panel');
+        document.getElementById('btn-notifications').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = notificationPanel.style.display === 'flex';
+            notificationPanel.style.display = isVisible ? 'none' : 'flex';
+            if (!isVisible) renderNotifications();
+        });
+        document.getElementById('btn-clear-notifications').addEventListener('click', (e) => {
+            e.stopPropagation();
+            clearNotifications();
+        });
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#notification-panel') && !e.target.closest('#btn-notifications')) {
+                notificationPanel.style.display = 'none';
+            }
         });
 
         // Resume Editor Event Listeners
@@ -2539,7 +2704,9 @@ The AI will automatically extract:
             renderTemplateList(null);
         };
 
-        // Generate resume for a job
+        // Generate resume for a job — non-blocking. Kicks off the backend task,
+        // registers it in activeGenerations, and returns immediately. A global
+        // polling loop handles completion/notification for all active jobs.
         window.generateResume = async function(jobId) {
             const job = jobs.find(j => j.id === jobId);
             if (!job) return;
@@ -2555,24 +2722,21 @@ The AI will automatically extract:
                 return;
             }
 
-            // Get selected model from dropdown. The first option is always the
-            // user's chosen default (Qwen 3.5 unless they changed it in
-            // Resume Settings). An explicit non-default choice means "use this
-            // model just this time".
+            // Avoid double-kicking the same job while one is already running.
+            if (activeGenerations.has(jobId)) {
+                console.log('[generateResume] Generation already in progress for job', jobId);
+                return;
+            }
+
+            // Determine model: if the editor dropdown exists and has an explicit
+            // non-default value, use it; otherwise use the user's default.
             const modelSelect = document.getElementById('resume-model-select');
             let selectedModel = modelSelect ? modelSelect.value : null;
             if (!selectedModel) {
                 selectedModel = getDefaultModel();
             }
 
-            // Show loading overlay
-            showLoadingOverlay(`Generating resume with ${selectedModel}...`);
-
-            // Update overlay text to show polling status
-            const overlayText = document.getElementById('loading-overlay-text');
-
             try {
-                // Fire the generation request (returns immediately with status: processing)
                 const body = {
                     example_resumes: settings.exampleResumes || [],
                     template: settings.templateFile
@@ -2592,87 +2756,128 @@ The AI will automatically extract:
 
                 const result = await response.json();
 
-                // If the response already has the resume (backwards compat), use it directly
+                // Backwards compat: if server returned the resume synchronously,
+                // apply it immediately and skip polling.
                 if (result.resume) {
                     job.generated_resume = result.resume;
                     job.resume_revisions = result.revisions || [];
                     job.structured_content = result.structured_content || null;
                     job.atoms_snapshot = result.atoms_snapshot || null;
-                    if (result.structured_empty_ratio && result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
-                        alert('Heads up: the model returned valid JSON but most fields are empty. Try Qwen 3.5 or click Regenerate again.');
-                    }
                     await fetchJobs();
                     openResumeEditor(jobId);
                     return;
                 }
 
-                // Poll for completion
-                const pollInterval = 3000; // 3 seconds
-                const maxPollTime = 270000; // 4.5 minutes (Cloud Run timeout is 300s)
-                const startTime = Date.now();
-
-                while (Date.now() - startTime < maxPollTime) {
-                    await new Promise(r => setTimeout(r, pollInterval));
-
-                    const elapsed = Math.round((Date.now() - startTime) / 1000);
-                    if (overlayText) overlayText.textContent = `Generating resume... (${elapsed}s)`;
-
-                    const pollResponse = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume/status`);
-
-                    if (!pollResponse.ok) {
-                        const errData = await pollResponse.json().catch(() => ({}));
-                        throw new Error(errData.detail || 'Failed to check generation status');
-                    }
-
-                    const pollResult = await pollResponse.json();
-
-                    if (pollResult.status === 'completed') {
-                        // Generation finished — copy structured fields from the
-                        // polling response FIRST so they're available even if
-                        // fetchJobs fails. fetchJobs will overwrite with the
-                        // canonical state right after.
-                        console.log('[generateResume] Generation completed, revisions:', pollResult.revisions?.length || 0, 'mode:', pollResult.mode, 'emptyRatio:', pollResult.structured_empty_ratio);
-                        job.generated_resume = pollResult.resume;
-                        job.resume_revisions = pollResult.revisions || [];
-                        job.structured_content = pollResult.structured_content || null;
-                        job.atoms_snapshot = pollResult.atoms_snapshot || null;
-
-                        // Warn the user if the LLM produced mostly-empty
-                        // structured content (small/cheap models do this).
-                        if (pollResult.structured_empty_ratio >= 0.7 && pollResult.mode !== 'plain') {
-                            alert('Heads up: the model returned valid JSON but most fields are empty. Try Qwen 3.5 or click Regenerate again.');
-                        }
-
-                        await fetchJobs();
-
-                        // Refresh the jobs array with the latest data
-                        const updatedJob = jobs.find(j => j.id === jobId);
-                        if (updatedJob) {
-                            // Update the local job reference with fresh data from fetchJobs
-                            job.generated_resume = updatedJob.generated_resume;
-                            job.resume_revisions = updatedJob.resume_revisions || [];
-                            job.structured_content = updatedJob.structured_content || null;
-                            job.atoms_snapshot = updatedJob.atoms_snapshot || null;
-                            console.log('[generateResume] Updated job from fetchJobs, structured atoms:', job.structured_content?.atoms?.length || 0);
-                        }
-
-                        openResumeEditor(jobId);
-                        return;
-                    } else if (pollResult.status === 'error') {
-                        throw new Error(pollResult.error || 'Generation failed');
-                    }
-                    // else still processing — keep polling
-                }
-
-                throw new Error('Resume generation timed out. Please try again.');
-
+                // Register this generation for non-blocking tracking.
+                activeGenerations.set(jobId, {
+                    jobId,
+                    company: job.company,
+                    position: job.position,
+                    model: selectedModel,
+                    step: 'Queued',
+                    percent: 0,
+                    status: 'processing',
+                    startTime: Date.now(),
+                });
+                renderGenerationProgress();
+                ensureGenerationPoller();
             } catch (error) {
                 console.error('Error generating resume:', error);
                 alert('Error generating resume: ' + error.message);
-            } finally {
-                hideLoadingOverlay();
             }
         };
+
+        // Poll every active generation until all are done. Single global loop.
+        let _generationPollTimer = null;
+        async function ensureGenerationPoller() {
+            if (_generationPollTimer) return;
+
+            const pollLoop = async () => {
+                if (activeGenerations.size === 0) {
+                    _generationPollTimer = null;
+                    return;
+                }
+
+                const checks = Array.from(activeGenerations.keys()).map(async (jobId) => {
+                    try {
+                        const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume/status`);
+                        if (!r.ok) {
+                            setGenerationStatus(jobId, 'error', 'Failed to check status', 0);
+                            return { jobId, error: 'status check failed' };
+                        }
+                        const result = await r.json();
+
+                        if (result.status === 'completed') {
+                            const job = jobs.find(j => j.id === jobId);
+                            if (job) {
+                                job.generated_resume = result.resume;
+                                job.resume_revisions = result.revisions || [];
+                                job.structured_content = result.structured_content || null;
+                                job.atoms_snapshot = result.atoms_snapshot || null;
+                            }
+                            await fetchJobs();
+                            const refreshedJob = jobs.find(j => j.id === jobId);
+                            if (refreshedJob && job) {
+                                job.generated_resume = refreshedJob.generated_resume;
+                                job.resume_revisions = refreshedJob.resume_revisions || [];
+                                job.structured_content = refreshedJob.structured_content || null;
+                                job.atoms_snapshot = refreshedJob.atoms_snapshot || null;
+                            }
+
+                            const version = result.version || 1;
+                            const gen = activeGenerations.get(jobId);
+                            const modelLabel = result.revisions?.[result.revisions.length - 1]?.model || gen?.model || getDefaultModel();
+                            addNotification({
+                                id: `gen-${jobId}-${version}-${Date.now()}`,
+                                jobId,
+                                version,
+                                model: modelLabel,
+                                timestamp: new Date().toISOString(),
+                                viewed: false,
+                            });
+
+                            // If this job's editor is currently open, refresh it in place.
+                            if (currentEditingJobId === jobId) {
+                                openResumeEditor(jobId);
+                            }
+
+                            removeActiveGeneration(jobId);
+
+                            if (result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
+                                // Non-blocking alert for quality issue.
+                                setTimeout(() => {
+                                    alert(`Heads up: the resume for ${job?.position || 'job ' + jobId} returned mostly empty structured content. Try regenerating with Qwen 3.5.`);
+                                }, 0);
+                            }
+                            return { jobId, done: true };
+                        } else if (result.status === 'error') {
+                            const gen = activeGenerations.get(jobId);
+                            const genJob = jobs.find(j => j.id === jobId);
+                            setGenerationStatus(jobId, 'error', result.error || 'Generation failed', 0);
+                            removeActiveGeneration(jobId);
+                            alert(`Resume generation failed for ${genJob?.position || gen?.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
+                            return { jobId, error: result.error };
+                        } else {
+                            setGenerationStatus(jobId, result.status, result.step || 'Processing', result.percent ?? activeGenerations.get(jobId)?.percent || 0);
+                            return { jobId, processing: true };
+                        }
+                    } catch (e) {
+                        console.error('[generationPoller] Error checking job', jobId, e);
+                        return { jobId, error: e.message };
+                    }
+                });
+
+                await Promise.all(checks);
+
+                if (activeGenerations.size === 0) {
+                    _generationPollTimer = null;
+                    return;
+                }
+                _generationPollTimer = setTimeout(pollLoop, 3000);
+            };
+
+            _generationPollTimer = setTimeout(pollLoop, 3000);
+        }
 
         // Open resume editor
         // ---------- Structured resume editor -------------------------------
