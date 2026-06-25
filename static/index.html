@@ -3145,8 +3145,24 @@ The AI will automatically extract:
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                const resumeName = (job.company || job.position || 'Resume').replace(/\s+/g, '_');
-                link.download = `${resumeName}_Resume.docx`;
+
+                // Build filename: YYYYMMDD - Role at Employer - V{N}.docx
+                const today = new Date();
+                const yyyymmdd = today.toISOString().slice(0, 10).replace(/-/g, '');
+                const role = (job.position || 'Resume').replace(/[\\/:*?"<>|]/g, '').trim();
+                const employer = (job.company || 'Unknown').replace(/[\\/:*?"<>|]/g, '').trim();
+
+                // Derive version from the dropdown, or fall back to latest revision
+                const versionSelect = document.getElementById('resume-version-select');
+                let versionNum = 1;
+                if (versionSelect && versionSelect.value) {
+                    versionNum = parseInt(versionSelect.value, 10) || 1;
+                } else if (job.resume_revisions && job.resume_revisions.length > 0) {
+                    versionNum = Math.max(...job.resume_revisions.map(r => r.version || 0));
+                }
+
+                const filename = `${yyyymmdd} - ${role} at ${employer} - V${versionNum}.docx`;
+                link.download = filename;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
