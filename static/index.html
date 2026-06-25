@@ -1610,24 +1610,33 @@ The AI will automatically extract:
         function renderJobs() {
             const activeContainer = document.getElementById('activeJobs');
             const archivedContainer = document.getElementById('archivedJobs');
+            const activeCard = activeContainer.closest('.card');
+            const archivedCard = archivedContainer.closest('.card');
 
             // Active pipeline: everything before a final disposition.
             // Archived/dispositioned: rejected, withdrawn, closed, not_pursuing.
-            let activeJobs = jobs.filter(j =>
+            const activeJobsAll = jobs.filter(j =>
                 ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
             );
-            let archivedJobs = jobs.filter(j =>
+            const archivedJobsAll = jobs.filter(j =>
                 ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(j.stage)
             );
 
-            // Apply filter
-            if (currentFilter !== 'all' && currentFilter !== 'archived') {
-                activeJobs = activeJobs.filter(j => {
-                    if (currentFilter === 'active') return ['saved', 'applied', 'phone_screen', 'interview', 'executive_call'].includes(j.stage);
-                    if (currentFilter === 'interview') return ['interview', 'executive_call'].includes(j.stage);
-                    if (currentFilter === 'offer') return j.stage === 'offered';
-                    return true;
-                });
+            // Apply selected filter to decide which list(s) to show and what goes in them.
+            let activeJobs = [];
+            let archivedJobs = [];
+
+            if (currentFilter === 'all') {
+                activeJobs = activeJobsAll;
+                archivedJobs = archivedJobsAll;
+            } else if (currentFilter === 'active') {
+                activeJobs = activeJobsAll.filter(j => ['saved', 'applied', 'phone_screen', 'interview', 'executive_call'].includes(j.stage));
+            } else if (currentFilter === 'interview') {
+                activeJobs = activeJobsAll.filter(j => ['interview', 'executive_call'].includes(j.stage));
+            } else if (currentFilter === 'offer') {
+                activeJobs = activeJobsAll.filter(j => j.stage === 'offered');
+            } else if (currentFilter === 'archived') {
+                archivedJobs = archivedJobsAll;
             }
 
             // Render active
@@ -1645,6 +1654,10 @@ The AI will automatically extract:
                     <p>No archived applications</p>
                 </div>
             `;
+
+            // Show/hide cards based on current filter
+            if (activeCard) activeCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
+            if (archivedCard) archivedCard.style.display = (currentFilter === 'all' || currentFilter === 'archived') ? '' : 'none';
 
             // Update counts
             document.getElementById('active-count').textContent = activeJobs.length;
