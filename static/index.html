@@ -1002,10 +1002,25 @@ The AI will automatically extract:
                     <div class="file-list" id="template-list" style="margin-top: 12px;"></div>
                 </div>
 
+                <div class="resume-settings-section" style="margin-top: 24px;">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 16px; color: var(--gray-800);">
+                        <i class="fas fa-microchip" style="color: var(--primary);"></i> Default Generation Model
+                    </h3>
+                    <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
+                        New resumes are generated with Qwen 3.5 by default. Choose a different model here only if you want every generation to use it automatically.
+                    </p>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <select id="resume-settings-default-model" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); min-width: 220px;">
+                            <!-- Options populated by JS from AVAILABLE_MODELS -->
+                        </select>
+                        <button type="button" id="btn-clear-default-model" class="btn btn-secondary" style="font-size: 0.85rem;">Reset to Qwen 3.5</button>
+                    </div>
+                </div>
+
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="btn-cancel-resume-settings">Close</button>
-                <button class="btn btn-primary" id="btn-save-resume-settings">Save Examples</button>
+                <button class="btn btn-primary" id="btn-save-resume-settings">Save Settings</button>
             </div>
         </div>
     </div>
@@ -1049,20 +1064,8 @@ The AI will automatically extract:
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-microchip"></i> Model:</span>
                         <select id="resume-model-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
-                            <!-- Ordered fastest → slowest by measured tokens/sec.
-                                 Defaults to qwen3.5:cloud as a sensible general-purpose choice. -->
-                            <option value="">Default (qwen3.5:cloud)</option>
-                            <option value="deepseek-v4-flash:cloud">DeepSeek V4 Flash · 175 tok/s</option>
-    
-                            <option value="kimi-k2.7-code:cloud">Kimi K2.7 Code · 98 tok/s</option>
-                            <option value="qwen3.5:cloud">Qwen 3.5 · 84 tok/s</option>
-                            <option value="gpt-oss:20b-cloud">GPT-OSS 20B · 78 tok/s</option>
-                            <option value="gpt-oss:120b-cloud">GPT-OSS 120B · 77 tok/s</option>
-                            <option value="glm-5.1:cloud">GLM 5.1 · 67 tok/s</option>
-                            <option value="minimax-m2.5:cloud">MiniMax M2.5 · 64 tok/s</option>
-                            <option value="gemma3:12b-cloud">Gemma 3 12B · 38 tok/s</option>
-                            <option value="gemma4:31b-cloud">Gemma 4 31B · 27 tok/s</option>
-                            <option value="minimax-m3:cloud">MiniMax M3 · 18 tok/s</option>
+                            <!-- Populated dynamically by openResumeEditor() so the user's
+                                 chosen default model always appears at the top and is not repeated. -->
                         </select>
                         <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
                         <select id="resume-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
@@ -1103,10 +1106,31 @@ The AI will automatically extract:
 
     <script>
         // Resume settings storage
+        // Ordered list of available generation models. The first entry is the
+        // app-wide default; users can override via Resume Settings.
+        const DEFAULT_MODEL = 'qwen3.5:cloud';
+        const AVAILABLE_MODELS = [
+            { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 84 tok/s' },
+            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 175 tok/s' },
+            { value: 'kimi-k2.7-code:cloud', label: 'Kimi K2.7 Code · 98 tok/s' },
+            { value: 'gpt-oss:20b-cloud', label: 'GPT-OSS 20B · 78 tok/s' },
+            { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B · 77 tok/s' },
+            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 67 tok/s' },
+            { value: 'minimax-m2.5:cloud', label: 'MiniMax M2.5 · 64 tok/s' },
+            { value: 'gemma3:12b-cloud', label: 'Gemma 3 12B · 38 tok/s' },
+            { value: 'gemma4:31b-cloud', label: 'Gemma 4 31B · 27 tok/s' },
+            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 18 tok/s' },
+        ];
+
         let resumeSettings = JSON.parse(localStorage.getItem('resumeSettings')) || {
             exampleResumes: [],
-            templateFile: null
+            templateFile: null,
+            defaultModel: null
         };
+
+        function getDefaultModel() {
+            return resumeSettings.defaultModel || DEFAULT_MODEL;
+        }
 
         let currentEditingJobId = null;
 
@@ -1986,6 +2010,10 @@ The AI will automatically extract:
 
         document.getElementById('btn-save-resume-settings').addEventListener('click', saveResumeSettings);
 
+        document.getElementById('btn-clear-default-model').addEventListener('click', () => {
+            document.getElementById('resume-settings-default-model').value = '';
+        });
+
         // Resume Editor Event Listeners
         document.getElementById('btn-close-resume-editor').addEventListener('click', () => {
             resumeEditorModal.classList.remove('active');
@@ -2110,7 +2138,8 @@ The AI will automatically extract:
                         id: template.id,
                         name: template.name,
                         uploadedAt: template.created_at
-                    } : null
+                    } : null,
+                    defaultModel: resumeSettings.defaultModel || null
                 };
 
                 localStorage.setItem('resumeSettings', JSON.stringify(settings));
@@ -2124,11 +2153,22 @@ The AI will automatically extract:
         function loadResumeSettings() {
             const settings = JSON.parse(localStorage.getItem('resumeSettings')) || {
                 exampleResumes: [],
-                templateFile: null
+                templateFile: null,
+                defaultModel: null
             };
+            resumeSettings = settings;
 
             renderExampleResumesList(settings.exampleResumes || []);
             renderTemplateList(settings.templateFile);
+
+            // Populate default-model dropdown: empty value means "app default (Qwen 3.5)"
+            const defaultModelSelect = document.getElementById('resume-settings-default-model');
+            if (defaultModelSelect) {
+                defaultModelSelect.innerHTML =
+                    `<option value="">Qwen 3.5 (app default)</option>` +
+                    AVAILABLE_MODELS.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                defaultModelSelect.value = settings.defaultModel || '';
+            }
         }
 
         // Load template atoms from the server (used at startup and on demand).
@@ -2181,9 +2221,11 @@ The AI will automatically extract:
                 }
 
                 // Save to localStorage for quick access
+                const defaultModelSelect = document.getElementById('resume-settings-default-model');
                 const settings = {
                     exampleResumes: resumeSettings.exampleResumes || [],
-                    templateFile: resumeSettings.templateFile || null
+                    templateFile: resumeSettings.templateFile || null,
+                    defaultModel: defaultModelSelect ? defaultModelSelect.value || null : null
                 };
                 localStorage.setItem('resumeSettings', JSON.stringify(settings));
                 resumeSettings = settings;
@@ -2513,24 +2555,18 @@ The AI will automatically extract:
                 return;
             }
 
-            // Get selected model from dropdown. The dropdown's first option has
-            // value="" which means "Default" (server uses the configured
-            // MODEL_GENERATION). An explicit value means "use this model".
-            // We only fall back to localStorage when the dropdown isn't
-            // mounted yet (a defensive case).
+            // Get selected model from dropdown. The first option is always the
+            // user's chosen default (Qwen 3.5 unless they changed it in
+            // Resume Settings). An explicit non-default choice means "use this
+            // model just this time".
             const modelSelect = document.getElementById('resume-model-select');
             let selectedModel = modelSelect ? modelSelect.value : null;
-            if (selectedModel === null) {
-                selectedModel = localStorage.getItem('lastUsedResumeModel') || '';
-            }
-            // Remember explicit selections for next time the modal opens,
-            // but don't persist "" because that would override a real choice.
-            if (selectedModel) {
-                localStorage.setItem('lastUsedResumeModel', selectedModel);
+            if (!selectedModel) {
+                selectedModel = getDefaultModel();
             }
 
             // Show loading overlay
-            showLoadingOverlay(selectedModel ? `Generating resume with ${selectedModel}...` : 'Generating resume...');
+            showLoadingOverlay(`Generating resume with ${selectedModel}...`);
 
             // Update overlay text to show polling status
             const overlayText = document.getElementById('loading-overlay-text');
@@ -2877,6 +2913,7 @@ The AI will automatically extract:
                 if (!currentStructuredContent.atoms[idx]) continue;
                 const atom = currentStructuredContent.atoms[idx];
                 const field = el.getAttribute('data-field');
+                if (!field) continue;
                 if (field === 'text') {
                     atom.text = el.value;
                 } else if (field.startsWith('segment-')) {
@@ -3074,11 +3111,17 @@ The AI will automatically extract:
             if (editorModal) {
                 editorModal.classList.add('active');
                 
-                // Set dropdown to saved model preference
+                // Build model dropdown: user's chosen default appears once at
+                // the top as "Default", followed by the rest of the models.
                 const modelSelect = document.getElementById('resume-model-select');
                 if (modelSelect) {
-                    const savedModel = localStorage.getItem('lastUsedResumeModel');
-                    if (savedModel) modelSelect.value = savedModel;
+                    const defaultModel = getDefaultModel();
+                    const defaultLabel = AVAILABLE_MODELS.find(m => m.value === defaultModel)?.label || defaultModel;
+                    const otherModels = AVAILABLE_MODELS.filter(m => m.value !== defaultModel);
+                    modelSelect.innerHTML =
+                        `<option value="">Default (${defaultLabel})</option>` +
+                        otherModels.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    modelSelect.value = ''; // default-on-default; user can override per-generation
                 }
                 
                 // Auto-select the latest version in the version dropdown
