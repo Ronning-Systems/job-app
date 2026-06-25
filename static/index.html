@@ -256,7 +256,7 @@
         .status-applied { background: #dbeafe; color: #1e40af; }
         .status-phone { background: #fef3c7; color: #92400e; }
         .status-interview { background: #d1fae5; color: #065f46; }
-        .status-offer { background: #fce7f3; color: #9d174d; }
+        .status-offer { background: #ffedd5; color: #c2410c; }
         .status-rejected { background: #fee2e2; color: #991b1b; }
         .status-accepted { background: #d1fae5; color: #065f46; }
 
@@ -945,6 +945,7 @@ The AI will automatically extract:
                             <option value="offered">Offered</option>
                             <option value="rejected">Rejected</option>
                             <option value="withdrawn">Withdrawn</option>
+                            <option value="not_pursuing">Not Pursuing</option>
                             <option value="closed">Closed</option>
                         </select>
                     </div>
@@ -1528,7 +1529,7 @@ The AI will automatically extract:
             return response;
         }
 
-        // Status mapping for the 9 stages
+        // Status mapping for the 10 stages
         const statusLabels = {
             saved: 'Saved',
             applied: 'Applied',
@@ -1538,6 +1539,7 @@ The AI will automatically extract:
             offered: 'Offered',
             rejected: 'Rejected',
             withdrawn: 'Withdrawn',
+            not_pursuing: 'Not Pursuing',
             closed: 'Closed'
         };
 
@@ -1550,6 +1552,7 @@ The AI will automatically extract:
             offered: 'status-offer',
             rejected: 'status-rejected',
             withdrawn: 'status-rejected',
+            not_pursuing: 'status-rejected',
             closed: 'status-rejected'
         };
 
@@ -1588,13 +1591,13 @@ The AI will automatically extract:
             const activeContainer = document.getElementById('activeJobs');
             const archivedContainer = document.getElementById('archivedJobs');
 
-            // Consider "saved", "applied", "phone_screen", "interview", "executive_call", "offered" as active
-            // Consider "rejected", "withdrawn", "closed" as archived
+            // Active pipeline: everything before a final disposition.
+            // Archived/dispositioned: rejected, withdrawn, closed, not_pursuing.
             let activeJobs = jobs.filter(j =>
                 ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
             );
             let archivedJobs = jobs.filter(j =>
-                ['rejected', 'withdrawn', 'closed'].includes(j.stage)
+                ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(j.stage)
             );
 
             // Apply filter
@@ -1638,6 +1641,8 @@ The AI will automatically extract:
                     }
                 });
             });
+
+            attachStageSelectHandlers();
         }
 
         function renderJobItem(job) {
@@ -1661,20 +1666,23 @@ The AI will automatically extract:
                         ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${job.remote}</span>` : ''}
                     </div>
                     <div class="job-actions">
-                        ${!isArchived ? `
-                            <button class="btn-sm btn-secondary" onclick="event.stopPropagation(); quickStatus(${job.id}, 'applied')">Mark Applied</button>
-                            <button class="btn-sm btn-success" onclick="event.stopPropagation(); quickStatus(${job.id}, 'interview')">Interview</button>
-                            <button class="btn-sm btn-warning" onclick="event.stopPropagation(); quickStatus(${job.id}, 'offered')">Offer</button>
-                        ` : ''}
                         ${hasGeneratedResume ? `
                             <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openResumeEditor(${job.id})" title="View/Edit Resume">
                                 <i class="fas fa-file-alt"></i> View Resume
                             </button>
-                        ` : !isArchived ? `
+                        ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateResume(${job.id})" title="Generate Resume">
                                 <i class="fas fa-magic"></i> Generate Resume
                             </button>
-                        ` : ''}
+                        `}
+                        <select class="job-stage-select" data-job-id="${job.id}" style="font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); cursor: pointer;"
+                            onclick="event.stopPropagation();"
+                        >
+                            ${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${job.stage === value ? 'selected' : ''}>${label}</option>`).join('')}
+                        </select>
+                        <button class="btn-sm btn-archive ${isArchived ? 'btn-success' : 'btn-secondary'}" onclick="event.stopPropagation(); toggleArchive(${job.id})" title="${isArchived ? 'Unarchive' : 'Archive'}">
+                            <i class="fas ${isArchived ? 'fa-folder-open' : 'fa-archive'}"></i>
+                        </button>
                     </div>
                 </div>
             `;
@@ -1705,6 +1713,26 @@ The AI will automatically extract:
                 console.error('Error updating status:', error);
             }
         };
+
+        window.toggleArchive = async function(id) {
+            const job = jobs.find(j => j.id === id);
+            if (!job) return;
+            const isArchived = ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(job.stage);
+            const newStage = isArchived ? 'saved' : 'closed';
+            await quickStatus(id, newStage);
+        };
+
+        // Wire up stage dropdowns after each render.
+        function attachStageSelectHandlers() {
+            document.querySelectorAll('.job-stage-select').forEach(select => {
+                select.addEventListener('change', async (e) => {
+                    e.stopPropagation();
+                    const jobId = parseInt(select.dataset.jobId);
+                    const newStage = select.value;
+                    await quickStatus(jobId, newStage);
+                });
+            });
+        }
 
         // Show detail modal
         async function showDetail(id) {
@@ -1901,7 +1929,7 @@ The AI will automatically extract:
                 </div>
             `;
 
-            const isArchived = ['rejected', 'withdrawn', 'closed'].includes(fullJob.stage);
+            const isArchived = ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(fullJob.stage);
             document.getElementById('btn-archive-toggle').textContent = isArchived ? 'Unarchive' : 'Archive';
             detailModal.classList.add('active');
         }
@@ -2094,7 +2122,7 @@ The AI will automatically extract:
             const job = jobs.find(j => j.id === currentJobId);
             if (!job) return;
 
-            const newStage = ['rejected', 'withdrawn', 'closed'].includes(job.stage) ? 'saved' : 'closed';
+            const newStage = ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(job.stage) ? 'saved' : 'closed';
             try {
                 await quickStatus(currentJobId, newStage);
                 detailModal.classList.remove('active');
