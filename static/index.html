@@ -2886,7 +2886,7 @@ The AI will automatically extract:
                             alert(`Resume generation failed for ${genJob?.position || gen?.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
                             return { jobId, error: result.error };
                         } else {
-                            setGenerationStatus(jobId, result.status, result.step || 'Processing', result.percent ?? activeGenerations.get(jobId)?.percent || 0);
+                            setGenerationStatus(jobId, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(jobId)?.percent) || 0);
                             return { jobId, processing: true };
                         }
                     } catch (e) {
