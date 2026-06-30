@@ -1146,16 +1146,22 @@ The AI will automatically extract:
         // app-wide default; users can override via Resume Settings.
         const DEFAULT_MODEL = 'qwen3.5:cloud';
         const AVAILABLE_MODELS = [
-            { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 84 tok/s' },
-            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 175 tok/s' },
-            { value: 'kimi-k2.7-code:cloud', label: 'Kimi K2.7 Code · 98 tok/s' },
-            { value: 'gpt-oss:20b-cloud', label: 'GPT-OSS 20B · 78 tok/s' },
-            { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B · 77 tok/s' },
-            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 67 tok/s' },
-            { value: 'minimax-m2.5:cloud', label: 'MiniMax M2.5 · 64 tok/s' },
-            { value: 'gemma3:12b-cloud', label: 'Gemma 3 12B · 38 tok/s' },
-            { value: 'gemma4:31b-cloud', label: 'Gemma 4 31B · 27 tok/s' },
-            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 18 tok/s' },
+            { value: 'gemini-3-flash-preview:cloud', label: 'Gemini 3 Flash Preview · 109 tok/s' },
+            { value: 'gemma4:31b-cloud', label: 'Gemma 4 31B · 99 tok/s' },
+            { value: 'kimi-k2.7-code:cloud', label: 'Kimi K2.7 Code · 91 tok/s' },
+            { value: 'deepseek-v4-pro:cloud', label: 'DeepSeek V4 Pro · 86 tok/s' },
+            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 82 tok/s' },
+            { value: 'minimax-m2.5:cloud', label: 'MiniMax M2.5 · 82 tok/s' },
+            { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B · 78 tok/s' },
+            { value: 'glm-5:cloud', label: 'GLM 5 · 70 tok/s' },
+            { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 65 tok/s' },
+            { value: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super · 65 tok/s' },
+            { value: 'gemma3:12b-cloud', label: 'Gemma 3 12B · 48 tok/s' },
+            { value: 'gpt-oss:20b-cloud', label: 'GPT-OSS 20B · 47 tok/s' },
+            { value: 'nemotron-3-ultra:cloud', label: 'Nemotron 3 Ultra · 36 tok/s' },
+            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 25 tok/s' },
+            { value: 'devstral-2:123b-cloud', label: 'Devstral 2 123B · 12 tok/s' },
+            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 11 tok/s' },
         ];
 
         let resumeSettings = JSON.parse(localStorage.getItem('resumeSettings')) || {
@@ -3343,9 +3349,15 @@ The AI will automatically extract:
                         'minimax-m2.5:cloud': 'MiniMax M2.5',
                         'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
                         'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
+                        'nemotron-3-super:cloud': 'Nemotron 3 Super',
                         'gemma4:31b-cloud': 'Gemma 4 31B',
+                        'gemma3:12b-cloud': 'Gemma 3 12B',
                         'glm-5.1:cloud': 'GLM 5.1',
+                        'glm-5:cloud': 'GLM 5',
                         'deepseek-v4-flash:cloud': 'DeepSeek V4 Flash',
+                        'deepseek-v4-pro:cloud': 'DeepSeek V4 Pro',
+                        'gemini-3-flash-preview:cloud': 'Gemini 3 Flash Preview',
+                        'devstral-2:123b-cloud': 'Devstral 2 123B',
                         'gpt-oss:20b-cloud': 'GPT-OSS 20B',
                         'gpt-oss:120b-cloud': 'GPT-OSS 120B',
                     };
