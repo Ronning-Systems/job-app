@@ -712,6 +712,11 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
         try:
             model_label = resume_result.get("model_used") or model_override or "qwen3.5:cloud"
 
+            existing_resume = db.query(GeneratedResume).filter(
+                GeneratedResume.job_id == job_id,
+                GeneratedResume.user_id == user_id,
+            ).first()
+
             if existing_resume:
                 # Coerce revisions into a plain list (JSON columns may round-trip as a custom type)
                 revisions = list(existing_resume.revisions or [])
