@@ -2727,8 +2727,28 @@ The AI will automatically extract:
         }
 
         // Remove example resume
-        window.removeExampleResume = function(index) {
+        window.removeExampleResume = async function(index) {
+            const file = resumeSettings.exampleResumes[index];
+            if (!file) return;
+            // If persisted server-side, delete from the database so it
+            // doesn't reappear on refresh.
+            if (file.id) {
+                try {
+                    const resp = await apiFetch(`${API_URL}/resumes/base/${file.id}`, { method: 'DELETE' });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        console.error('[removeExampleResume] delete failed:', err.detail || resp.status);
+                        alert('Failed to delete example resume from server. It may reappear on refresh.');
+                        return;
+                    }
+                } catch (e) {
+                    console.error('[removeExampleResume] network error:', e);
+                    alert('Network error deleting example resume. It may reappear on refresh.');
+                    return;
+                }
+            }
             resumeSettings.exampleResumes.splice(index, 1);
+            localStorage.setItem('resumeSettings', JSON.stringify(resumeSettings));
             renderExampleResumesList(resumeSettings.exampleResumes);
         };
 
