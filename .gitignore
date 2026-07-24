@@ -1,5 +1,8 @@
 .DS_Store
-/.env
+# Local environment files (keep .env.example committed as the template)
+.env
+.env.*
+!.env.example
 *.db
 *.log
 .claude/
