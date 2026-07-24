@@ -722,6 +722,80 @@
         font-size: 1rem; font-weight: 600; transition: background 0.2s;
     }
     .auth-modal .btn-login-modal:hover { background: #4338ca; }
+
+    /* ─── Billing / Paywall ─── */
+    .paywall-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    }
+    .paywall-overlay.active { display: flex; }
+    .paywall-modal {
+        background: white;
+        border-radius: 16px;
+        padding: 40px;
+        text-align: center;
+        max-width: 480px;
+        width: 92%;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .paywall-modal h2 { color: #111827; margin: 0 0 8px 0; font-size: 1.6rem; }
+    .paywall-modal p  { color: #6b7280; margin: 0 0 20px 0; line-height: 1.5; }
+    .paywall-plans {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin: 16px 0 20px 0;
+    }
+    .paywall-plan {
+        border: 2px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+        text-align: left;
+    }
+    .paywall-plan.featured {
+        border-color: var(--primary, #4f46e5);
+        background: #f5f3ff;
+    }
+    .paywall-plan h3 { margin: 0 0 4px 0; font-size: 1.1rem; color: #111827; }
+    .paywall-plan .price { font-size: 0.9rem; color: #6b7280; margin-bottom: 8px; }
+    .paywall-plan ul { list-style: none; padding: 0; margin: 8px 0 0 0; font-size: 0.9rem; color: #374151; }
+    .paywall-plan ul li::before { content: "✓ "; color: #10b981; font-weight: 700; }
+    .paywall-actions { display: flex; gap: 10px; justify-content: center; }
+    .paywall-actions button { padding: 12px 24px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
+    .paywall-actions .btn-primary { background: var(--primary, #4f46e5); color: white; }
+    .paywall-actions .btn-primary:hover { background: #4338ca; }
+    .paywall-actions .btn-secondary { background: #e5e7eb; color: #374151; }
+    .paywall-actions .btn-secondary:hover { background: #d1d5db; }
+
+    /* Usage pill in header (next to auth) */
+    .usage-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255,255,255,0.18);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-right: 12px;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+    }
+    .usage-pill:hover { background: rgba(255,255,255,0.28); border-color: rgba(255,255,255,0.4); }
+    .usage-pill .usage-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #10b981;
+    }
+    .usage-pill .usage-dot.warning { background: #f59e0b; }
+    .usage-pill .usage-dot.full { background: #ef4444; }
+    .usage-pill.pro .usage-dot { background: #a78bfa; }
     </style>
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
@@ -739,6 +813,42 @@
             <h2>Joblign</h2>
             <p>Get aligned for success</p>
             <button class="btn-login-modal" onclick="login()">Sign In</button>
+        </div>
+    </div>
+
+    <!-- Paywall modal: shown when user hits cap, or when they click the usage pill -->
+    <div class="paywall-overlay" id="paywall-overlay">
+        <div class="paywall-modal">
+            <h2 id="paywall-title">Upgrade to Pro</h2>
+            <p id="paywall-message">You've used all your free generations for this month.</p>
+            <div class="paywall-plans">
+                <div class="paywall-plan">
+                    <h3>Free</h3>
+                    <div class="price">$0</div>
+                    <ul>
+                        <li><span id="paywall-free-cap">3</span> generations / month</li>
+                        <li>Unlimited tracked jobs</li>
+                        <li>DOCX export</li>
+                    </ul>
+                </div>
+                <div class="paywall-plan featured">
+                    <h3>Pro</h3>
+                    <div class="price" id="paywall-pro-price">$9.99 / month</div>
+                    <ul>
+                        <li><span id="paywall-pro-cap">50</span> generations / month</li>
+                        <li>Unlimited tracked jobs</li>
+                        <li>DOCX export</li>
+                        <li>Priority model selection</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="paywall-actions">
+                <button class="btn-secondary" onclick="closePaywall()">Maybe later</button>
+                <button class="btn-primary" id="paywall-upgrade-btn" onclick="startCheckout()">Upgrade to Pro</button>
+            </div>
+            <p id="paywall-manage-link" style="display:none; margin-top: 16px; font-size: 0.85rem;">
+                Already subscribed? <a href="#" onclick="openPortal(event)">Manage billing</a>
+            </p>
         </div>
     </div>
     <!-- Header -->
@@ -1632,6 +1742,11 @@ The AI will automatically extract:
         let auth0Client = null;
         let currentUser = null;
 
+        // ─── Billing / Stripe state ───
+        let billingConfig = null;   // /api/billing/config — plans, price label, billing_enabled
+        let billingStatus = null;   // /api/billing/status — current user's plan + usage
+        let paywallReturnContext = null;  // { source: 'cap' | 'pill' | 'post-signup' }
+
         // ─── Auth0 SDK Initialization ───
         // Checks /api/health; if the backend reports auth_disabled=true, skip
         // Auth0 entirely and load the app as a local-dev user. Otherwise the
@@ -1714,6 +1829,224 @@ The AI will automatically extract:
             }
         }
 
+        // ─── Billing: config + status ───
+        async function loadBillingConfig() {
+            try {
+                const r = await fetch(`${API_URL}/billing/config`);
+                billingConfig = await r.json();
+            } catch (e) {
+                console.warn('Failed to load billing config:', e);
+                billingConfig = { billing_enabled: false, plans: { free: { cap: 3 }, pro: { cap: 50 } } };
+            }
+        }
+
+        async function refreshBillingStatus() {
+            if (!currentUser) return;
+            try {
+                const r = await apiFetch(`${API_URL}/billing/status`);
+                if (r.ok) {
+                    billingStatus = await r.json();
+                    renderUsagePill();
+                }
+            } catch (e) {
+                console.warn('Failed to load billing status:', e);
+            }
+        }
+
+        function renderUsagePill() {
+            const container = document.getElementById('auth-container');
+            if (!container || !billingStatus) return;
+
+            // If user is not signed in, don't show the pill.
+            if (!currentUser) return;
+
+            // Remove any existing pill before re-rendering.
+            const existing = container.querySelector('.usage-pill');
+            if (existing) existing.remove();
+
+            const used = billingStatus.used || 0;
+            const cap = billingStatus.cap || 0;
+            const plan = billingStatus.plan || 'free';
+            const remaining = Math.max(0, cap - used);
+            const ratio = cap > 0 ? used / cap : 0;
+            let dotClass = '';
+            if (ratio >= 1) dotClass = 'full';
+            else if (ratio >= 0.66) dotClass = 'warning';
+
+            const pill = document.createElement('button');
+            pill.className = 'usage-pill' + (plan === 'pro' ? ' pro' : '');
+            pill.title = `${plan === 'pro' ? 'Pro plan' : 'Free plan'} — ${used} of ${cap} generations used this month. Click to manage.`;
+            pill.innerHTML = `<span class="usage-dot ${dotClass}"></span> ${used}/${cap} ${plan === 'pro' ? 'Pro' : 'Free'}`;
+            pill.onclick = openPaywallFromPill;
+            container.prepend(pill);
+        }
+
+        // ─── Paywall modal ───
+        function openPaywall(opts = {}) {
+            paywallReturnContext = opts;
+            const overlay = document.getElementById('paywall-overlay');
+            const titleEl = document.getElementById('paywall-title');
+            const msgEl = document.getElementById('paywall-message');
+            const upgradeBtn = document.getElementById('paywall-upgrade-btn');
+            const manageLink = document.getElementById('paywall-manage-link');
+            const freeCap = document.getElementById('paywall-free-cap');
+            const proCap = document.getElementById('paywall-pro-cap');
+            const proPrice = document.getElementById('paywall-pro-price');
+
+            // Update dynamic plan info
+            if (billingConfig && billingConfig.plans) {
+                if (billingConfig.plans.free && billingConfig.plans.free.cap != null) {
+                    freeCap.textContent = billingConfig.plans.free.cap;
+                }
+                if (billingConfig.plans.pro && billingConfig.plans.pro.cap != null) {
+                    proCap.textContent = billingConfig.plans.pro.cap;
+                }
+            }
+            if (billingConfig && billingConfig.price_label) {
+                proPrice.textContent = billingConfig.price_label;
+            }
+
+            if (opts.source === 'cap') {
+                titleEl.textContent = "You've hit your free limit";
+                msgEl.textContent = opts.message || 'Upgrade to Pro to keep generating resumes this month.';
+            } else if (opts.source === 'post-signup') {
+                titleEl.textContent = 'Welcome!';
+                msgEl.textContent = 'You start on the Free plan. Upgrade to Pro when you need more generations.';
+            } else {
+                titleEl.textContent = 'Upgrade to Pro';
+                msgEl.textContent = 'Get more resume generations and priority model access.';
+            }
+
+            if (!billingConfig || !billingConfig.billing_enabled) {
+                upgradeBtn.textContent = 'Billing not configured';
+                upgradeBtn.disabled = true;
+                upgradeBtn.style.opacity = '0.5';
+                upgradeBtn.style.cursor = 'not-allowed';
+            } else if (billingStatus && billingStatus.plan === 'pro') {
+                upgradeBtn.textContent = 'Open billing portal';
+            } else {
+                upgradeBtn.textContent = 'Upgrade to Pro';
+                upgradeBtn.disabled = false;
+                upgradeBtn.style.opacity = '';
+                upgradeBtn.style.cursor = '';
+            }
+
+            // Show the "manage billing" link if the user already has a Stripe customer
+            if (billingStatus && billingStatus.has_stripe_customer) {
+                manageLink.style.display = '';
+            } else {
+                manageLink.style.display = 'none';
+            }
+
+            overlay.classList.add('active');
+        }
+
+        function openPaywallFromPill() {
+            openPaywall({ source: 'pill' });
+        }
+
+        function closePaywall() {
+            document.getElementById('paywall-overlay').classList.remove('active');
+        }
+
+        async function startCheckout() {
+            if (!billingConfig || !billingConfig.billing_enabled) {
+                alert('Billing is not configured on this server. The owner needs to set up Stripe.');
+                return;
+            }
+            // If user is already on pro, send them to the portal instead.
+            if (billingStatus && billingStatus.plan === 'pro') {
+                return openPortal();
+            }
+            try {
+                upgradeBtnState(true);
+                const r = await apiFetch(`${API_URL}/billing/checkout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ return_url: window.location.origin }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Could not start checkout.');
+                }
+                const data = await r.json();
+                window.location.href = data.url;
+            } catch (e) {
+                alert('Checkout error: ' + e.message);
+                upgradeBtnState(false);
+            }
+        }
+
+        function upgradeBtnState(loading) {
+            const btn = document.getElementById('paywall-upgrade-btn');
+            if (!btn) return;
+            if (loading) {
+                btn.disabled = true;
+                btn.textContent = 'Redirecting...';
+            } else {
+                btn.disabled = false;
+                btn.textContent = 'Upgrade to Pro';
+            }
+        }
+
+        async function openPortal(e) {
+            if (e) e.preventDefault();
+            try {
+                const r = await apiFetch(`${API_URL}/billing/portal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ return_url: window.location.origin }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Could not open billing portal.');
+                }
+                const data = await r.json();
+                window.location.href = data.url;
+            } catch (err) {
+                alert('Portal error: ' + err.message);
+            }
+        }
+
+        // When the user returns from Stripe checkout (?billing=success),
+        // the webhook may still be in flight. Poll a few times for status
+        // to update, then show a confirmation. When the user cancels
+        // (?billing=canceled), just show a message and clean the URL.
+        async function handleBillingRedirect() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('billing') === 'success') {
+                // Clean the URL immediately so a refresh doesn't re-fire.
+                window.history.replaceState({}, document.title, '/');
+                // Poll up to ~10s for the webhook to land.
+                for (let i = 0; i < 10; i++) {
+                    await refreshBillingStatus();
+                    if (billingStatus && billingStatus.plan === 'pro') {
+                        alert("You're now on Pro! Your next 50 generations this month are covered.");
+                        return;
+                    }
+                    await new Promise((r) => setTimeout(r, 1000));
+                }
+                alert("Almost there! Your subscription is being activated. Refresh in a moment to see your Pro plan.");
+            } else if (params.get('billing') === 'canceled') {
+                window.history.replaceState({}, document.title, '/');
+                // No-op; just a silent return.
+            }
+        }
+
+        // Show the paywall once after a fresh sign-in, as a soft upsell.
+        // Only triggers on the redirect-from-Auth0 path (flag is set in
+        // login() and cleared after the first time we act on it).
+        function maybeShowPostSignupUpsell() {
+            let justSignedIn = false;
+            try { justSignedIn = sessionStorage.getItem('jobsync:just_signed_in') === '1'; } catch (_) {}
+            if (!justSignedIn) return;
+            try { sessionStorage.removeItem('jobsync:just_signed_in'); } catch (_) {}
+            // Only upsell free users (don't show this to existing pros).
+            if (billingStatus && billingStatus.plan === 'pro') return;
+            // Slight delay so the user can see the app load first.
+            setTimeout(() => openPaywall({ source: 'post-signup' }), 800);
+        }
+
         // ─── Auth UI ───
         function updateAuthUI() {
             const container = document.getElementById('auth-container');
@@ -1751,6 +2084,9 @@ The AI will automatically extract:
                     return;
                 }
             }
+            // Remember the user is in a fresh-login flow so we can offer the
+            // upgrade modal after Auth0 redirects back. (Billing/paywall.)
+            try { sessionStorage.setItem('jobsync:just_signed_in', '1'); } catch (_) {}
             if (auth0Client) {
                 // Pass scope so the authorize call requests offline_access for
                 // refresh tokens (must match the createAuth0Client authorizationParams).
@@ -1773,6 +2109,7 @@ The AI will automatically extract:
                 });
             }
             currentUser = null;
+            try { sessionStorage.removeItem('jobsync:just_signed_in'); } catch (_) {}
             document.getElementById('auth-overlay').style.display = 'flex';
             updateAuthUI();
         }
@@ -2607,6 +2944,8 @@ The AI will automatically extract:
 
         // ─── Initialize App (called only after successful auth) ───
         function initApp() {
+            // Load billing config (public — works pre-auth too)
+            loadBillingConfig();
             // Initial data fetch from database
             fetchJobs();
             fetchStats();
@@ -2616,6 +2955,15 @@ The AI will automatically extract:
             // in the right initial state.
             renderNotifications();
             renderGenerationProgress();
+
+            // After we have a user (currentUser set by bootstrap/initAuth),
+            // pull their billing status. Slight delay so initApp can finish
+            // and DOM is ready.
+            setTimeout(async () => {
+                await refreshBillingStatus();
+                handleBillingRedirect();
+                maybeShowPostSignupUpsell();
+            }, 0);
 
             // ============================================
             // RESUME GENERATION FUNCTIONALITY
@@ -3280,6 +3628,15 @@ The AI will automatically extract:
                     body: JSON.stringify(body)
                 });
 
+                if (response.status === 402) {
+                    // Cap reached — refresh status (to keep the pill in sync),
+                    // then open the paywall.
+                    const errData = await response.json().catch(() => ({}));
+                    await refreshBillingStatus();
+                    openPaywall({ source: 'cap', message: (errData.detail && errData.detail.message) || null });
+                    return;
+                }
+
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({}));
                     throw new Error(errData.detail || 'Failed to start resume generation');
@@ -3296,6 +3653,8 @@ The AI will automatically extract:
                     job.atoms_snapshot = result.atoms_snapshot || null;
                     await fetchJobs();
                     openResumeEditor(jobId);
+                    // Refresh usage pill in case generation counted
+                    refreshBillingStatus();
                     return;
                 }
 
@@ -3313,6 +3672,7 @@ The AI will automatically extract:
                 });
                 renderGenerationProgress();
                 ensureGenerationPoller();
+                refreshBillingStatus();
             } catch (error) {
                 console.error('Error generating resume:', error);
                 alert('Error generating resume: ' + error.message);

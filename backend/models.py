@@ -35,10 +35,20 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Billing
+    # plan: 'free' | 'pro'. Defaults to 'free' for new users. Existing users
+    # are grandfathered to 'pro' on first migration run (see _run_migrations).
+    plan = Column(String(32), default="free", nullable=False, index=True)
+    plan_grandfathered = Column(Boolean, default=False, nullable=False)
+    # Stripe customer id (set on first checkout session creation)
+    stripe_customer_id = Column(String(128), nullable=True, index=True)
+
     # Relationships
     jobs = relationship("Job", back_populates="user")
     base_resumes = relationship("BaseResume", back_populates="user")
     base_cover_letters = relationship("BaseCoverLetter", back_populates="user", cascade="all, delete-orphan")
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    usage_events = relationship("UsageEvent", back_populates="user", cascade="all, delete-orphan")
 
 
 class Job(Base):
@@ -217,6 +227,46 @@ class ArtifactScore(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Subscription(Base):
+    """Active Stripe subscription for a user. One row per user (latest)."""
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    stripe_customer_id = Column(String(128), nullable=True, index=True)
+    stripe_subscription_id = Column(String(128), nullable=True, unique=True, index=True)
+    stripe_price_id = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=False, default="incomplete")  # active, trialing, past_due, canceled, unpaid, incomplete, incomplete_expired
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    canceled_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="subscription")
+
+
+class UsageEvent(Base):
+    """A single counted use of a billable action. Inserted when a generation
+    succeeds (not on failure). The current month is determined by created_at
+    via usage counting helpers in billing.py.
+    """
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # 'resume_generation' is the only counted event type for now.
+    event_type = Column(String(64), nullable=False, default="resume_generation")
+    # Optional reference to the entity this event is associated with (e.g., job id).
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # Snapshot of plan at the time of the event — useful for analytics.
+    plan_at_event = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="usage_events")
+
+
 # Database setup - PostgreSQL for production, SQLite for local dev
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -314,6 +364,68 @@ def _run_alembic_upgrade():
         cfg.set_main_option("sqlalchemy.url", str(engine.url))
         command.upgrade(cfg, "head")
         logger.info("Migrations applied")
+
+    # Check users table for billing columns
+    if 'users' in inspector.get_table_names():
+        existing_cols = [c['name'] for c in inspector.get_columns('users')]
+        with eng.connect() as conn:
+            if 'plan' not in existing_cols:
+                logger.info("Migrating: adding 'plan' column to users")
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan VARCHAR(32) DEFAULT 'free' NOT NULL"))
+                conn.commit()
+            if 'plan_grandfathered' not in existing_cols:
+                logger.info("Migrating: adding 'plan_grandfathered' column to users")
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan_grandfathered BOOLEAN DEFAULT FALSE NOT NULL"))
+                conn.commit()
+            if 'stripe_customer_id' not in existing_cols:
+                logger.info("Migrating: adding 'stripe_customer_id' column to users")
+                conn.execute(text("ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(128)"))
+                conn.commit()
+            # Idempotent index on plan for fast cap lookups
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_plan ON users (plan)"))
+                conn.commit()
+            except Exception as e:
+                logger.debug(f"Index ix_users_plan may already exist: {e}")
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)"))
+                conn.commit()
+            except Exception as e:
+                logger.debug(f"Index ix_users_stripe_customer_id may already exist: {e}")
+
+            # Grandfather: any user that exists at the moment the 'plan'
+            # column is first added gets 'pro' access forever (no card
+            # required). Gated by a schema_migrations flag so this only
+            # runs the first time the plan column is added — subsequent
+            # restarts won't re-grandfather new signups.
+            with eng.connect() as conn:
+                # Make sure schema_migrations exists
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
+                    "  name VARCHAR(128) PRIMARY KEY,"
+                    "  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                    ")"
+                ))
+                conn.commit()
+                already = conn.execute(text(
+                    "SELECT 1 FROM schema_migrations WHERE name = 'grandfather_users_to_pro'"
+                )).first()
+                if not already:
+                    grandfather_count = conn.execute(text(
+                        "UPDATE users SET plan = 'pro', plan_grandfathered = TRUE "
+                        "WHERE plan_grandfathered = FALSE AND created_at IS NOT NULL"
+                    )).rowcount
+                    if grandfather_count:
+                        logger.info(
+                            f"Migrating: grandfathered {grandfather_count} existing user(s) to pro plan"
+                        )
+                    conn.execute(text(
+                        "INSERT INTO schema_migrations (name) VALUES ('grandfather_users_to_pro')"
+                    ))
+                    conn.commit()
+
+    # New billing tables (subscriptions, usage_events) are created automatically
+    # by Base.metadata.create_all() above, so no inline ALTER needed.
 
 
 def get_db():

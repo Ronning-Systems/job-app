@@ -77,6 +77,53 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
 - The baseline revision is `453348d81a12` (matches the schema as of the
   2026-07-25 redesign). The production DB is stamped at that revision.
 
+## Billing / Stripe (my-stack only)
+
+Stripe integration lives in this repo (routes under `/api/billing/*`,
+client UI in `static/index.html`, logic in `backend/billing.py`). The
+**only** deploy target that wires Stripe in is `my-stack/deploy-patrick-mini.sh`,
+which materializes secrets from Vault into the app container. Cloud Run
+is retired (see above) — do not reintroduce a Cloud Run deploy path.
+
+- **Plans**: `free` (3 generations/month) and `pro` (50/month). Caps are
+  configurable via `BILLING_FREE_CAP` / `BILLING_PRO_CAP` env vars; price
+  label via `BILLING_PRO_PRICE_LABEL`. All counted as resume-generation
+  events against `usage_events` (one per successful generation).
+- **Grandfathering**: any user that existed at the time the `plan` column
+  was first added gets `plan='pro', plan_grandfathered=TRUE` permanently
+  — no card required. Gated by a `schema_migrations` row so it's
+  idempotent across redeploys.
+- **Disable billing locally**: leave `STRIPE_SECRET_KEY` unset in `.env`.
+  All billing routes return 503; cap enforcement is skipped (every user
+  is treated as effectively pro) so dev isn't blocked.
+- **Webhook events handled**: `customer.subscription.{created,updated,
+  deleted,trial_will_end}`, `checkout.session.completed`,
+  `invoice.payment_{succeeded,failed}`. Subscription status maps to
+  `user.plan` on every event; grandfathered users are never overridden.
+- **Cap check** is at `POST /api/jobs/{id}/generate-resume` (returns 402
+  with `{code, plan, cap, used}` so the SPA can open the paywall). The
+  UsageEvent row is only written on success (in the background task
+  after `db.commit()`).
+
+### Wiring Stripe secrets on patrick-mini
+
+The Stripe secrets must be added to Vault at `jobapp/prod` (or
+`jobapp/test` for the test env):
+
+```bash
+# On patrick-mini, with vault CLI:
+vault kv put jobapp/prod \
+  STRIPE_SECRET_KEY=sk_live_... \
+  STRIPE_WEBHOOK_SECRET=whsec_... \
+  STRIPE_PUBLISHABLE_KEY=pk_live_... \
+  STRIPE_PRICE_ID_PRO=price_... \
+  PUBLIC_SITE_URL=https://joblign.ronning.systems
+```
+
+After adding/updating secrets, restart the `app` (and `secrets-fetcher`
+if it caches them) in the `jobapp` compose project so the app picks up
+the new env files. See `my-stack/AGENTS.md` for the compose layout.
+
 ## Other notes
 
 - **Single template per user**: `BaseResume` table enforces one row with

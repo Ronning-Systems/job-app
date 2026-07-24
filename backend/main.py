@@ -21,7 +21,7 @@ if env_path.exists():
 
     load_dotenv(dotenv_path=env_path)
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -43,6 +43,8 @@ from models import (
     GeneratedResume,
     GeneratedCoverLetter,
     ArtifactScore,
+    Subscription,
+    UsageEvent,
     SessionLocal,
     User,
     generate_public_job_id,
@@ -51,6 +53,7 @@ from job_parser import JobParser
 from agents import agent_service
 from auth import get_current_user
 from ssrf import is_url_safe
+import billing
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +78,14 @@ async def startup_event():
 
 # Auth endpoints
 @app.get("/api/auth/me")
-async def get_auth_me(current_user: User = Depends(get_current_user)):
-    """Return current authenticated user's profile"""
+async def get_auth_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return current authenticated user's profile + plan + usage"""
+    plan = billing.get_effective_plan(current_user)
+    cap = billing.plan_cap(plan)
+    used = billing.get_usage_this_month(current_user, db)
     return {
         "id": current_user.id,
         "auth0_id": current_user.auth0_id,
@@ -85,6 +94,15 @@ async def get_auth_me(current_user: User = Depends(get_current_user)):
         "avatar_url": current_user.avatar_url,
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
+        "plan": plan,
+        "plan_grandfathered": bool(getattr(current_user, "plan_grandfathered", False)),
+        "billing": {
+            "enabled": not billing.BILLING_DISABLED,
+            "plan": plan,
+            "cap": cap,
+            "used": used,
+            "remaining": max(0, cap - used),
+        },
     }
 
 
@@ -839,6 +857,26 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             if job:
                 job.updated_at = datetime.utcnow()
 
+            # Billing: count this generation as a usage event. We insert it
+            # right after the resume is committed so we only count successes.
+            # The cap was already enforced at the sync /generate-resume
+            # endpoint, so this is the second leg of the gate.
+            try:
+                if not billing.BILLING_DISABLED:
+                    usage_user = db.query(User).filter(User.id == user_id).first()
+                    if usage_user:
+                        event = UsageEvent(
+                            user_id=user_id,
+                            event_type="resume_generation",
+                            job_id=job_id,
+                            plan_at_event=billing.get_effective_plan(usage_user),
+                        )
+                        db.add(event)
+            except Exception as e:
+                # Don't fail the whole generation if the usage insert hiccups;
+                # the gate at the endpoint will catch next time anyway.
+                logger.warning(f"[generate-resume-bg] usage insert failed: {e}")
+
             db.commit()
             db.refresh(generated_resume)
 
@@ -901,6 +939,25 @@ async def generate_job_resume(
     job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Billing: gate the request before we do any work. We check (don't
+    # increment) here; the actual UsageEvent row is written in
+    # _do_generate_resume only on success.
+    plan = billing.get_effective_plan(current_user)
+    cap = billing.plan_cap(plan)
+    used = billing.get_usage_this_month(current_user, db)
+    if used >= cap and not billing.BILLING_DISABLED:
+        # 402 Payment Required — frontend recognizes this and opens paywall.
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "usage_cap_reached",
+                "message": f"You've used all {cap} {billing.PLANS[plan]['name']} generations this month. Upgrade to Pro for more.",
+                "plan": plan,
+                "cap": cap,
+                "used": used,
+            },
+        )
 
     job_description = job.job_description_parsed or job.job_description_raw
 
@@ -1197,6 +1254,121 @@ async def ollama_health_check():
                 }
     except Exception as e:
         return {"status": "unreachable", "url": ollama_url, "message": str(e)}
+
+
+# ----------------------------------------------------------------------------
+# Billing endpoints
+# ----------------------------------------------------------------------------
+
+@app.get("/api/billing/config")
+async def billing_config():
+    """Public config for the SPA: publishable key, plan info, billing enabled."""
+    return billing.get_public_config()
+
+
+@app.get("/api/billing/status")
+async def billing_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the current user's plan + current-month usage."""
+    plan = billing.get_effective_plan(current_user)
+    cap = billing.plan_cap(plan)
+    used = billing.get_usage_this_month(current_user, db)
+    return {
+        "enabled": not billing.BILLING_DISABLED,
+        "plan": plan,
+        "plan_grandfathered": bool(getattr(current_user, "plan_grandfathered", False)),
+        "cap": cap,
+        "used": used,
+        "remaining": max(0, cap - used),
+        "has_stripe_customer": bool(current_user.stripe_customer_id),
+    }
+
+
+class CheckoutRequest(BaseModel):
+    return_url: Optional[str] = None
+
+
+@app.post("/api/billing/checkout")
+async def billing_checkout(
+    body: CheckoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a Stripe Checkout session for the Pro plan. Returns the URL."""
+    if billing.BILLING_DISABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is not configured on this server. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID_PRO to enable.",
+        )
+    try:
+        url = billing.create_checkout_session(current_user, db, return_url=body.return_url)
+    except Exception as e:
+        logger.error(f"[billing] create_checkout_session failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not create checkout session.")
+    return {"url": url}
+
+
+class PortalRequest(BaseModel):
+    return_url: Optional[str] = None
+
+
+@app.post("/api/billing/portal")
+async def billing_portal(
+    body: PortalRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a Stripe Customer Portal session. Returns the URL."""
+    if billing.BILLING_DISABLED:
+        raise HTTPException(status_code=503, detail="Billing is not configured on this server.")
+    if not current_user.stripe_customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No Stripe customer for this user. Subscribe first to manage billing.",
+        )
+    try:
+        url = billing.create_portal_session(current_user, db, return_url=body.return_url)
+    except Exception as e:
+        logger.error(f"[billing] create_portal_session failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not create portal session.")
+    return {"url": url}
+
+
+@app.post("/api/billing/webhook")
+async def billing_webhook(request: Request, db: Session = Depends(get_db)):
+    """Receive Stripe webhooks. No auth (Stripe signs them).
+
+    Configure in Stripe Dashboard: endpoint URL = <this route>, events:
+    customer.subscription.created/updated/deleted,
+    customer.subscription.trial_will_end,
+    checkout.session.completed,
+    invoice.payment_succeeded, invoice.payment_failed.
+    """
+    if billing.BILLING_DISABLED or not billing.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook not configured.")
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig, billing.STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        logger.warning(f"[stripe-webhook] Invalid payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except Exception as e:  # stripe.error.SignatureVerificationError
+        logger.warning(f"[stripe-webhook] Invalid signature: {e}")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        status = billing.handle_webhook_event(event.to_dict() if hasattr(event, "to_dict") else dict(event), db)
+    except Exception as e:
+        logger.error(f"[stripe-webhook] handler error: {e}", exc_info=True)
+        # 200 so Stripe doesn't retry on our bug; we've logged.
+        return {"received": True, "error": str(e)}
+    return {"received": True, "status": status}
 
 
 @app.get("/api/stats")
