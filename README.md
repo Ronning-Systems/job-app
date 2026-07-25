@@ -1,6 +1,14 @@
-# JobSync - Job Application Tracker
+# Joblign — Get aligned for success
 
-A personal job application tracking system with AI-powered job description parsing, resume generation, and ATS analysis. Deployed on Google Cloud Run.
+A personal job application tracking system with AI-powered job description
+parsing, resume generation, and ATS analysis. Track applications, generate
+tailored cover letters, and align your resume to each role.
+
+> **Branding:** The app name is **Joblign**, tagline **"Get aligned for
+> success"**. The legacy name "JobSync" no longer appears in user-visible
+> text. The opaque Auth0 API identifier `https://jobsync/api` is kept
+> intentionally (renaming it requires reconfiguring the Auth0 dashboard
+> and breaks active sessions).
 
 ## Features
 
@@ -25,43 +33,52 @@ A personal job application tracking system with AI-powered job description parsi
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────┐
-│              Google Cloud Run                 │
-│                                              │
-│  ┌──────────────────────────────────┐        │
-│  │     Cloud Run Service           │        │
-│  │     (job-app)                   │        │
-│  │                                 │        │
-│  │  /api/*       → backend routes  │        │
-│  │  /            → index.html      │        │
-│  │  /api/fetch-job → URL fetching │        │
-│  │                                 │        │
-│  │  Env vars:                      │        │
-│  │    DATABASE_URL  → Cloud SQL    │        │
-│  │    MODEL_ENDPOINT → Ollama Cloud│       │
-│  │    OLLAMA_API_KEY (secret)      │        │
-│  └──────────┬──────────┬──────────┘        │
-│             │          │                    │
-│  ┌──────────▼──┐  ┌───▼──────────────┐   │
-│  │ Cloud SQL   │  │ Secret Manager     │   │
-│  │ PostgreSQL  │  │ (DB creds, API key) │   │
-│  └─────────────┘  └────────────────────┘   │
-└──────────────────────────────────────────────┘
-         │
-         │ HTTPS (MODEL_ENDPOINT)
-         │
-┌────────▼────────────────────────────────────┐
-│  Ollama Cloud                                │
-│  (models: minimax-m2.5, glm-5, kimi-k2.5)   │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│            patrick-mini (homelab, Tailscale)            │
+│                                                        │
+│  ┌──────────────────────────────────────────┐          │
+│  │  Traefik v3 (HTTPS, Let's Encrypt)       │          │
+│  │  joblign.ronning.systems → jobapp:8080   │          │
+│  └──────────────────────┬───────────────────┘          │
+│                         │                              │
+│  ┌──────────────────────▼───────────────────┐          │
+│  │  Joblign app container (job-app image)   │          │
+│  │  uvicorn backend.main:app --port 8080    │          │
+│  │                                          │          │
+│  │  /api/*       → backend routes           │          │
+│  │  /            → static/index.html        │          │
+│  │  /api/fetch-job → URL fetching           │          │
+│  │                                          │          │
+│  │  Env from Vault (secret materializer):   │          │
+│  │    DATABASE_URL  → postgres service      │          │
+│  │    MODEL_ENDPOINT → Ollama Cloud         │          │
+│  │    AUTH0_*  → Auth0                      │          │
+│  └──────────┬─────────────────┬────────────┘          │
+│             │                 │                        │
+│  ┌──────────▼─────┐  ┌───────▼──────────────┐         │
+│  │  Postgres 16   │  │  Vault (secrets KV)  │         │
+│  │  (jobapp PG)    │  │  jobapp/prod path    │         │
+│  └────────────────┘  └──────────────────────┘         │
+└────────────────────────────────────────────────────────┘
+          │
+          │ HTTPS (MODEL_ENDPOINT)
+          │
+┌────────▼────────────────────────────────────────────────┐
+│  Ollama Cloud                                          │
+│  (models: minimax-m2.5, glm-5, kimi-k2.5)              │
+└────────────────────────────────────────────────────────┘
 ```
 
 ### Tech Stack
 - **Backend**: Python 3.11, FastAPI, SQLAlchemy
-- **Database**: PostgreSQL (Cloud SQL) in production, SQLite for local dev
+- **Database**: PostgreSQL 16 in production, SQLite for local dev
 - **Frontend**: Single-page HTML/CSS/JS (no build step)
 - **AI**: Ollama Cloud API (minimax-m2.5, glm-5, kimi-k2.5)
-- **Deployment**: Docker, Google Cloud Run, Cloud Build
+- **Deployment**: Docker, self-hosted on `patrick-mini` via the
+  `my-stack/deploy-patrick-mini.sh` orchestrator; Traefik v3 reverse proxy
+  with automatic Let's Encrypt TLS; Vault for secrets. **Cloud Run / GCP
+  is no longer a deploy target** — the Cloud Run scripts, `cloudbuild.yaml`,
+  and `DEPLOYMENT.md` have been removed.
 
 ### API Endpoints
 
@@ -127,75 +144,60 @@ Without `DATABASE_URL` set, the app falls back to SQLite. Without `OLLAMA_API_KE
 | `MODEL_AGENTS` | Model for agent analysis | `llama3.2:latest` |
 | `MODEL_COMMANDS` | Model for commands | `llama3.2:latest` |
 | `OLLAMA_API_KEY` | API key for Ollama Cloud | (none — local dev) |
+| `AUTH0_DOMAIN` | Auth0 tenant domain | (empty = local dev bypass) |
+| `AUTH0_AUDIENCE` | Auth0 API identifier (opaque, do not rename) | `https://jobsync/api` |
+| `CORS_ORIGIN` | Comma-separated allowed origins | `http://localhost:8765,https://joblign.ronning.systems` |
 
-## Deployment (Cloud Run)
+## Deployment
 
-### One-time setup
+Production deploys to `patrick-mini` (homelab server on Tailscale) using the
+`my-stack/deploy-patrick-mini.sh` orchestrator. The deploy path is owned by
+the **`my-stack`** repo — see `my-stack/AGENTS.md` for the canonical workflow.
+
+### Routine deploy
 
 ```bash
-# 1. Enable GCP APIs
-gcloud services enable run.googleapis.com sqladmin.googleapis.com \
-  cloudbuild.googleapis.com secretmanager.googleapis.com \
-  artifactregistry.googleapis.com
-
-# 2. Create Cloud SQL instance
-gcloud sql instances create jobsync-db \
-  --database-version=POSTGRES_15 \
-  --tier=db-f1-micro \
-  --region=us-west1
-
-# 3. Create database and user
-gcloud sql databases create jobsync --instance=jobsync-db
-gcloud sql users create jobsync --instance=jobsync-db --password=<PASSWORD>
-
-# 4. Create secrets
-echo -n "postgresql+psycopg2://jobsync:<PASSWORD>@/jobsync?host=/cloudsql/<CONNECTION_NAME>" | \
-  gcloud secrets create DATABASE_URL --data-file=-
-echo -n "<OLLAMA_API_KEY>" | \
-  gcloud secrets create OLLAMA_API_KEY --data-file=-
-
-# 5. Grant Cloud Run access to secrets
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
-gcloud secrets add-iam-policy-binding DATABASE_URL \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-gcloud secrets add-iam-policy-binding OLLAMA_API_KEY \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+# from my-stack/ (not job-app/)
+git add -A && git commit -m "<message>" && git push origin main
+./deploy-patrick-mini.sh
 ```
 
-### Deploy
+The script builds the image on `patrick-mini` via `docker buildx`, renders
+the Traefik config and compose files with `envsubst`, and brings up the
+four stacks (network → traefik → vault → jobapp) with `docker compose`.
+
+### Production URL
+
+- `https://joblign.ronning.systems` — public, via Traefik + Let's Encrypt
+- `https://job-app.patrick-mini.ts.net` — Tailscale-only fallback
+
+### Rollback
 
 ```bash
-# Option 1: Cloud Build (automated)
-gcloud builds submit --config=cloudbuild.yaml
-
-# Option 2: One-shot deploy from source
-gcloud run deploy job-app \
-  --source . \
-  --region us-west1 \
-  --allow-unauthenticated \
-  --add-cloudsql-instances ronning-systems:us-west1:ronning-systems-jobapp \
-  --set-env-vars "MODEL_ENDPOINT=https://ollama.com,MODEL_PARSING=minimax-m2.5:cloud,MODEL_AGENTS=glm-5:cloud,MODEL_COMMANDS=kimi-k2.5:cloud" \
-  --set-secrets "DATABASE_URL=DATABASE_URL:latest,OLLAMA_API_KEY=OLLAMA_API_KEY:latest"
+git checkout <sha> -- portainer/
+./deploy-patrick-mini.sh
 ```
 
 ## Project Structure
 
 ```
 job-app/
-├── index.html                 # Frontend SPA
-├── Dockerfile                 # Container build config
-├── cloudbuild.yaml            # Cloud Build CI/CD pipeline
-├── deploy-setup.sh            # One-time GCP setup script
+├── static/                    # Frontend SPA + brand assets
+│   ├── index.html             # Single-page frontend
+│   ├── joblign-logo.png       # Joblign logo (header)
+│   ├── joblign-logo.webp      #   WebP variant
+│   ├── joblign-favicon.png    # Favicon
+│   └── joblign-favicon.webp   #   WebP variant
+├── Dockerfile                 # Container build config (patrick-mini target)
 ├── .dockerignore              # Docker build exclusions
 │
 ├── backend/
 │   ├── main.py                # FastAPI application (API + static serving)
-│   ├── models.py             # SQLAlchemy models (PostgreSQL/SQLite)
-│   ├── job_parser.py           # Job description parser (Ollama-powered)
+│   ├── auth.py                # Auth0 JWT validation
+│   ├── models.py              # SQLAlchemy models (PostgreSQL/SQLite)
+│   ├── job_parser.py          # Job description parser (Ollama-powered)
 │   ├── agents.py              # Agent service (ATS, tech fit, resume gen)
-│   └── requirements.txt       # Python dependencies
+│   └── requirements.txt        # Python dependencies
 │
 ├── agents/                    # Agent prompt definitions
 │   ├── ats-expert.md
@@ -203,10 +205,10 @@ job-app/
 │   ├── hr-professional.md
 │   └── tech-hiring-manager.md
 │
-├── static/                   # Static frontend files (Docker build target)
-│   └── index.html
-│
-└── mcp_server.py              # Standalone MCP server (local dev only)
+├── mcp_server.py              # Standalone MCP server (local dev only)
+├── run_local.sh               # Local dev server (SQLite, hot reload)
+├── run_local_docker.sh        # Local Docker dev (joblign-local image)
+└── setup.sh                   # First-time venv setup
 ```
 
 ## License

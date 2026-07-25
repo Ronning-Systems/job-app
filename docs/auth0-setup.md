@@ -1,6 +1,11 @@
-# Auth0 Setup Guide for JobSync
+# Auth0 Setup Guide for Joblign
 
-This guide walks through configuring Auth0 as the identity provider for JobSync.
+This guide walks through configuring Auth0 as the identity provider for Joblign.
+
+> The legacy Auth0 API identifier `https://jobsync/api` is intentionally
+> retained — it is an opaque identifier registered in the Auth0 dashboard,
+> not a user-visible brand string. Renaming it requires reconfiguring the
+> Auth0 dashboard API identifier and breaks all active sessions.
 
 ## 1. Create an Auth0 Account
 
@@ -11,22 +16,22 @@ This guide walks through configuring Auth0 as the identity provider for JobSync.
 ## 2. Create a Single Page Application
 
 1. In the Auth0 Dashboard, go to **Applications** > **Applications** and click **Create Application**.
-2. Name it `JobSync` and select **Single Page Web Applications** as the application type.
+2. Name it `Joblign` and select **Single Page Web Applications** as the application type.
 3. In the **Settings** tab, configure:
 
    **Allowed Callback URLs:**
    ```
-   http://localhost:8000, https://job-app-913142543866.us-west1.run.app
+   http://localhost:8765, https://joblign.ronning.systems
    ```
 
    **Allowed Logout URLs:**
    ```
-   http://localhost:8000, https://job-app-913142543866.us-west1.run.app
+   http://localhost:8765, https://joblign.ronning.systems
    ```
 
    **Allowed Web Origins:**
    ```
-   http://localhost:8000, https://job-app-913142543866.us-west1.run.app
+   http://localhost:8765, https://joblign.ronning.systems
    ```
 
 4. Under **Advanced Settings** > **Grant Types**, ensure **Authorization Code** and **Refresh Token** are enabled.
@@ -37,14 +42,14 @@ This guide walks through configuring Auth0 as the identity provider for JobSync.
 ## 3. Create an API
 
 1. Go to **Applications** > **APIs** and click **Create API**.
-2. Name it `JobSync API`.
-3. Set the **Identifier** to `https://jobsync/api` — this is the `AUTH0_AUDIENCE` value used by both frontend and backend.
+2. Name it `Joblign API`.
+3. Set the **Identifier** to `https://jobsync/api` — this is the `AUTH0_AUDIENCE` value used by both frontend and backend. (This opaque identifier is left as-is for backwards compatibility; do not rename it without rotating all sessions.)
 4. Keep **RS256** as the signing algorithm.
 5. Click **Save**.
 
 ## 4. Configure Refresh Tokens
 
-1. Go to **Applications** > **Applications** and open the JobSync SPA created in step 2.
+1. Go to **Applications** > **Applications** and open the Joblign SPA created in step 2.
 2. Scroll to **Refresh Token** settings.
 3. Configure:
    - **Rotation Type:** Rotating
@@ -76,7 +81,9 @@ The following values are already configured in the deployed application:
 |---|---|
 | `AUTH0_DOMAIN` | `dev-saxftot48835pavp.us.auth0.com` |
 | `AUTH0_CLIENT_ID` | `sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8` |
-| `AUTH0_AUDIENCE` | `https://jobsync/api` |
-| `CORS_ORIGIN` | `https://job-app-913142543866.us-west1.run.app` |
+| `AUTH0_AUDIENCE` | `https://jobsync/api` (opaque, do not rename) |
+| `CORS_ORIGIN` | `https://joblign.ronning.systems` |
 
-These are set as Cloud Run environment variables (not secrets — they're public config values).
+In production these are materialized from Vault by the `jobapp-secrets-fetcher`
+sidecar (see `my-stack/portainer/stacks/jobapp.yml`); the deploy orchestrator is
+`my-stack/deploy-patrick-mini.sh`.

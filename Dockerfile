@@ -20,7 +20,11 @@ EXPOSE 8080
 
 ENV PYTHONPATH=/app/backend
 ENV AUTH0_DOMAIN=""
+# AUTH0_AUDIENCE is an opaque API identifier registered in the Auth0
+# dashboard, not a user-visible brand string. Kept as https://jobsync/api
+# so existing tokens keep validating; changing it requires reconfiguring
+# the Auth0 dashboard API identifier and breaks active sessions.
 ENV AUTH0_AUDIENCE="https://jobsync/api"
-ENV CORS_ORIGIN="https://jobsync.ronning.systems,https://job-app-yu22xh2opa-uw.a.run.app,http://localhost:8765"
+ENV CORS_ORIGIN="https://joblign.ronning.systems,http://localhost:8765"
 ENV MODEL_GENERATION=""
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]

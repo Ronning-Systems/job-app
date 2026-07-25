@@ -1,13 +1,13 @@
 #!/bin/bash
 # Local Docker Deployment Script
-# Builds and runs JobSync locally using Docker (not Cloud Run)
+# Builds and runs Joblign locally using Docker.
 
 set -e
 
 # Configuration
 PORT="${PORT:-8765}"
-IMAGE_NAME="job-app-local"
-CONTAINER_NAME="job-app-local"
+IMAGE_NAME="joblign-local"
+CONTAINER_NAME="joblign-local"
 
 # Colors
 GREEN='\033[0;32m'
@@ -22,7 +22,7 @@ log_step() { echo -e "${BLUE}→${NC} $1"; }
 log_error() { echo -e "${RED}✗${NC} $1"; }
 
 echo "=========================================================================="
-echo "JobSync - Local Docker Deployment"
+echo "Joblign — Get aligned for success (Local Docker Deployment)"
 echo "=========================================================================="
 echo "Port:        ${PORT}"
 echo "Image:       ${IMAGE_NAME}"

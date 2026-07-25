@@ -1,13 +1,21 @@
 ---
 name: local-docker-deploy
-description: Create repeatable local Docker deployment scripts for Cloud Run apps to avoid Cloud Build costs
+description: Create repeatable local Docker deployment scripts to avoid remote build costs
 source: auto-skill
 extracted_at: '2026-06-20T16:35:13.116Z'
 ---
 
-# Local Docker Deployment for Cloud Run Applications
+# Local Docker Deployment for Joblign
 
-When deploying a Cloud Run application locally for development/testing without incurring Cloud Build costs, create a repeatable Docker-based deployment script.
+> **Branding note (2026-07-25):** The app was renamed JobSync → **Joblign**
+> (tagline "Get aligned for success"). The legacy Cloud Run / GCP deployment
+> path is retired; production now runs self-hosted on `patrick-mini` via
+> `my-stack/deploy-patrick-mini.sh`. This skill covers local-Docker dev
+> only. The `https://jobsync/api` Auth0 audience is an opaque identifier
+> kept intentionally — do not rename it.
+
+When running Joblign locally in Docker for development/testing, use the
+`run_local_docker.sh` script (image `joblign-local`, container `joblign-local`).
 
 ## When to Use
 
@@ -114,8 +122,8 @@ For local development:
 set -e
 
 PORT="${PORT:-8765}"
-IMAGE_NAME="job-app-local"
-CONTAINER_NAME="job-app-local"
+IMAGE_NAME="joblign-local"
+CONTAINER_NAME="joblign-local"
 
 # Check Docker
 if ! docker info &> /dev/null; then
@@ -160,13 +168,13 @@ echo "Running at http://localhost:${PORT}"
 
 ```bash
 # View logs
-docker logs job-app-local
+docker logs joblign-local
 
 # Follow logs
-docker logs -f job-app-local
+docker logs -f joblign-local
 
 # Stop container
-docker stop job-app-local
+docker stop joblign-local
 
 # View running containers
 docker ps

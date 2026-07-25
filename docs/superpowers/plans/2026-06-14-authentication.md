@@ -2,6 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Branding note (2026-07-25):** The app was renamed JobSync → **Joblign**
+> (tagline "Get aligned for success"). This historical implementation plan
+> keeps the original prose for the audit trail. The only "jobsync" string
+> that still exists in the live codebase is the Auth0 API identifier
+> `https://jobsync/api` — an opaque value registered in the Auth0 dashboard,
+> intentionally kept so existing issued tokens keep validating. The Cloud
+> Run deployment steps in this plan are obsolete; the canonical deploy is
+> `my-stack/deploy-patrick-mini.sh` (self-hosted on patrick-mini).
+
 **Goal:** Add Auth0 authentication with per-user data isolation, right-size LLM model usage per agent task, and add resume revision history with text-based feedback.
 
 **Architecture:** Auth0 handles login (Google/GitHub providers) and issues JWTs. The FastAPI backend validates JWTs via PyJWT against Auth0's JWKS endpoint, auto-provisions users on first login, and filters all data queries by `user_id`. Each agent task uses the LLM model best suited for its complexity: minimax-m2.5 for job parsing (structured extraction), glm-5 for ATS/tech-fit analysis (structured JSON), and kimi-k2.5 for resume generation and revision (long-form creative output). Resume revisions are tracked as a versioned list within each job's generated resume record.

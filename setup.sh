@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# JobSync Setup Script
+# Joblign Setup Script
 # Creates Python 3.9 virtual environments for all Python services
 
 set -e
 
 echo "========================================"
-echo "JobSync Setup Script"
+echo "Joblign Setup Script"
 echo "========================================"
 
 # Check Python version
@@ -102,7 +102,7 @@ cat > start_all.sh << 'EOF'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "Starting JobSync services..."
+echo "Starting Joblign services..."
 echo "=============================="
 
 # Start MCP Server in background

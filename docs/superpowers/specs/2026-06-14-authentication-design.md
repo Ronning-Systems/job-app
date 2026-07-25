@@ -2,11 +2,18 @@
 
 **Date:** 2026-06-14
 **Status:** Approved (post-security-review)
-**Scope:** Add Auth0 authentication with per-user data isolation to JobSync
+**Scope:** Add Auth0 authentication with per-user data isolation to Joblign (formerly JobSync)
+
+> **Branding note (2026-07-25):** The app was renamed JobSync → **Joblign**
+> (tagline "Get aligned for success"). This historical design doc keeps the
+> original prose for the audit trail. The only "jobsync" string that still
+> exists in the live codebase is the Auth0 API identifier `https://jobsync/api`
+> — an opaque value registered in the Auth0 dashboard, intentionally kept
+> so existing issued tokens keep validating.
 
 ## Overview
 
-JobSync currently has no authentication — all API endpoints are publicly accessible and all data is in a single shared pool. This spec adds:
+Joblign (then named JobSync) had no authentication — all API endpoints were publicly accessible and all data was in a single shared pool. This spec adds:
 
 1. **Auth0 authentication** with Google and GitHub social providers
 2. **Per-user data isolation** — each user sees only their own jobs, resumes, and generated content

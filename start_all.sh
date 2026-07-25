@@ -2,7 +2,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "Starting JobSync services..."
+echo "Starting Joblign services..."
 echo "=============================="
 
 # Start MCP Server in background

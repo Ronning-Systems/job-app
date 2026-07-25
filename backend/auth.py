@@ -1,8 +1,14 @@
 """
-Authentication module for JobSync.
+Authentication module for Joblign.
 
 Validates JWTs from Auth0 and provides FastAPI dependencies for
 user authentication and authorization.
+
+Note: AUTH0_AUDIENCE defaults to "https://jobsync/api" — this is an opaque
+API identifier registered in the Auth0 dashboard, not a user-visible
+brand string. It is intentionally left as-is so existing issued tokens
+keep validating; renaming it would require reconfiguring the Auth0
+dashboard API identifier and breaking all active sessions.
 """
 
 import os

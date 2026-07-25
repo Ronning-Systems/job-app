@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JobSync - Track Your Applications</title>
+    <title>Joblign — Get aligned for success</title>
+    <meta name="description" content="Joblign — Get aligned for success. Track your job applications, generate tailored cover letters, and align your resume to each role.">
+    <link rel="icon" type="image/png" href="/joblign-favicon.png">
+    <link rel="icon" type="image/webp" href="/joblign-favicon.webp">
+    <link rel="apple-touch-icon" href="/joblign-favicon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * {
@@ -51,6 +55,15 @@
             font-size: 1.75rem;
             font-weight: 700;
             margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        header h1 .brand-logo {
+            height: 40px;
+            width: auto;
+            display: block;
         }
 
         header p {
@@ -723,16 +736,16 @@
 
     <div class="auth-overlay" id="auth-overlay" style="display: none;">
         <div class="auth-modal">
-            <h2>JobSync</h2>
-            <p>Sign in to track your job applications</p>
+            <h2>Joblign</h2>
+            <p>Get aligned for success</p>
             <button class="btn-login-modal" onclick="login()">Sign In</button>
         </div>
     </div>
     <!-- Header -->
     <header>
         <div class="header-content">
-            <h1><i class="fas fa-briefcase"></i> JobSync</h1>
-            <p>Track your job applications and stay organized</p>
+            <h1><img src="/joblign-logo.webp" alt="Joblign" class="brand-logo" onerror="this.onerror=null;this.src='/joblign-logo.png'"> Joblign</h1>
+            <p>Get aligned for success</p>
             <div class="auth-container" id="auth-container"></div>
             <div class="stats" id="stats-bar">
                 <div class="stat" data-filter="all" role="button" tabindex="0">
@@ -1201,10 +1214,10 @@ The AI will automatically extract:
         let activeGenerations = new Map();
         // Notifications for completed generations not yet viewed. Each entry:
         // {id, jobId, company, position, version, model, timestamp, viewed}.
-        let notifications = JSON.parse(localStorage.getItem('jobSyncNotifications')) || [];
+        let notifications = JSON.parse(localStorage.getItem('joblignNotifications')) || [];
 
         function persistNotifications() {
-            localStorage.setItem('jobSyncNotifications', JSON.stringify(notifications));
+            localStorage.setItem('joblignNotifications', JSON.stringify(notifications));
         }
 
         function addNotification(notification) {
@@ -1406,7 +1419,7 @@ The AI will automatically extract:
         }
 
         // API Base URL
-        const isProduction = window.location.hostname === 'jobsync.ronning.systems' || window.location.hostname.endsWith('.run.app');
+        const isProduction = window.location.hostname === 'joblign.ronning.systems' || window.location.hostname.endsWith('.ts.net');
         const API_URL = isProduction
             ? `${window.location.origin}/api`
             : 'http://localhost:8765/api';

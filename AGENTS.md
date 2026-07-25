@@ -1,39 +1,59 @@
-# Project Conventions — JobSync
+# Project Conventions — Joblign
 
 This file captures project-specific conventions and preferences the user
 has stated explicitly. Read this before taking action that might conflict.
 
-## Deploy workflow — use `deploy.sh`, not Cloud Build
+## Branding
 
-**Always deploy by running `./deploy.sh` from the project root.** Do not
-use `gcloud builds submit` even though `cloudbuild.yaml` exists.
+- The app is **Joblign**, tagline **"Get aligned for success"**.
+- The legacy name "JobSync" no longer appears in user-visible text. The
+  only intentional "jobsync" string left in the codebase is the Auth0 API
+  audience identifier `https://jobsync/api` — it is an opaque identifier
+  registered in the Auth0 dashboard, not a brand string. Renaming it
+  requires reconfiguring the Auth0 dashboard API identifier and breaks
+  all active sessions. **Do not** mass-replace `jobsync` without keeping
+  this exception in mind.
+- Brand assets live in `static/`: `joblign-logo.{png,webp}` (header) and
+  `joblign-favicon.{png,webp}` (favicon). Served at the app root via
+  explicit routes in `backend/main.py` (the SPA catch-all would otherwise
+  return index.html for these paths).
 
-Reasons:
-- The user prefers local Docker builds (`docker build --platform linux/amd64`)
-  + `docker push` + `gcloud run deploy` rather than Cloud Build to avoid
-  Cloud Build costs and keep iteration in one script.
-- `deploy.sh` is the canonical deploy entrypoint — it builds, pushes,
-  deploys, and migrates traffic in one shot.
+## Deploy workflow — owned by `my-stack`, not this repo
 
-To redeploy after edits:
+**This repo (`job-app`) is the application source. It does not contain
+the deploy orchestrator.** The canonical deploy is
+`my-stack/deploy-patrick-mini.sh`, which builds the image on
+`patrick-mini` via `docker buildx`, renders the Traefik config and the
+four compose stacks with `envsubst`, and brings them up with
+`docker compose -p <name> up -d`.
 
-```bash
-git add -A && git commit -m "<message>" && git push origin main
-./deploy.sh
-```
-
-`deploy.sh` deploys with `--no-traffic` and then migrates with
-`gcloud run services update-traffic --to-latest` itself, so no extra
-traffic-migration step is required.
-
-If you ever need to migrate traffic independently (e.g., to roll back
-without rebuilding), the script `migrate-traffic.sh` exists but it had
-a `describe-traffic` bug fixed in commit history — the simple working
-incantation is:
+To redeploy after edits to `job-app`:
 
 ```bash
-gcloud run services update-traffic job-app --region=us-west1 --to-latest
+# 1. Sync app changes into my-stack (from my-stack/):
+git fetch job-app
+git merge --allow-unrelated-histories -X theirs job-app/main
+git checkout HEAD -- AGENTS.md .gitignore   # restore ops-only overrides
+git commit -m "Sync app code from job-app@<sha>"
+
+# 2. Deploy (from my-stack/):
+./deploy-patrick-mini.sh
 ```
+
+### Cloud Run is retired
+
+GCP / Cloud Run is **no longer a deploy target**. The Cloud Run scripts
+(`deploy.sh`, `deploy-setup.sh`, `migrate-traffic.sh`, `rollback.sh`,
+`status.sh`), `cloudbuild.yaml`, and `DEPLOYMENT.md` have been removed
+from this repo. If they resurface after a sync, delete them again —
+they are stale. The canonical deploy path is `deploy-patrick-mini.sh`
+in `my-stack`, full stop. See `my-stack/AGENTS.md` for the authoritative
+ops conventions.
+
+### Production URL
+
+- Public: `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
+- Tailscale-only fallback: `https://job-app.patrick-mini.ts.net`
 
 ## Other notes
 
@@ -48,7 +68,7 @@ gcloud run services update-traffic job-app --region=us-west1 --to-latest
   the template's captured style atoms. Empty structured tab means the
   resume was generated before template atoms existed — Regenerate once
   to populate both tabs from a single LLM call.
-- **README/agent docs**: `docs/superpowers/` contains design notes for
-  the original auth migration and Cloud Run setup — useful context for
-  understanding architectural choices but treat as historical, not
-  prescriptive.
+- **README/agent docs**: `docs/superpowers/` contains design notes. The
+  Portainer / patrick-mini deploy spec
+  (`2026-07-18-portainer-deploy-design.md`) describes the architecture
+  still in use today. Older Cloud Run specs/plans are historical only.

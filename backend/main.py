@@ -51,10 +51,10 @@ from ssrf import is_url_safe
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Job Tracker API")
+app = FastAPI(title="Joblign API")
 
 # CORS
-CORS_ORIGINS = os.getenv("CORS_ORIGIN", "http://localhost:8765,https://jobsync.ronning.systems").split(",")
+CORS_ORIGINS = os.getenv("CORS_ORIGIN", "http://localhost:8765,https://joblign.ronning.systems").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -1124,7 +1124,7 @@ async def health_check():
     from auth import AUTH_DISABLED
     return {
         "status": "healthy",
-        "service": "job-tracker-api",
+        "service": "joblign-api",
         "auth_disabled": AUTH_DISABLED,
     }
 
@@ -1373,6 +1373,27 @@ async def fetch_job(request: dict, current_user: User = Depends(get_current_user
 # Static file serving and SPA catch-all
 STATIC_DIR = str(Path(__file__).parent.parent / "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# Brand assets served at root (favicon + logo referenced from index.html <head>/<header>)
+@app.get("/joblign-favicon.png")
+async def brand_favicon_png():
+    return FileResponse(Path(STATIC_DIR) / "joblign-favicon.png", media_type="image/png")
+
+
+@app.get("/joblign-favicon.webp")
+async def brand_favicon_webp():
+    return FileResponse(Path(STATIC_DIR) / "joblign-favicon.webp", media_type="image/webp")
+
+
+@app.get("/joblign-logo.png")
+async def brand_logo_png():
+    return FileResponse(Path(STATIC_DIR) / "joblign-logo.png", media_type="image/png")
+
+
+@app.get("/joblign-logo.webp")
+async def brand_logo_webp():
+    return FileResponse(Path(STATIC_DIR) / "joblign-logo.webp", media_type="image/webp")
 
 
 @app.get("/")

@@ -17,7 +17,7 @@ import httpx
 
 from job_parser import JobParser
 
-app = FastAPI(title="JobSync MCP Server")
+app = FastAPI(title="Joblign MCP Server")
 
 app.add_middleware(
     CORSMiddleware,

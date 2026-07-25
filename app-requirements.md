@@ -1,7 +1,7 @@
-# JobSync - Functional Requirements (Actual Implementation)
+# Joblign — Get aligned for success (Functional Requirements / Actual Implementation)
 
 ## Overview
-JobSync is a job application tracking system with AI-powered resume generation and job description parsing.
+Joblign is a job application tracking system with AI-powered resume generation and job description parsing. Tagline: "Get aligned for success".
 
 ## User Authentication
 **Status: NOT IMPLEMENTED**

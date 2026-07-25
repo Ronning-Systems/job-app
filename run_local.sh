@@ -1,11 +1,11 @@
 #!/bin/bash
 # Local Development Server Script
-# Runs the JobSync backend on localhost with SQLite database
+# Runs the Joblign backend on localhost with SQLite database
 
 set -e
 
 echo "=========================================================================="
-echo "JobSync - Local Development Server"
+echo "Joblign — Get aligned for success (Local Development Server)"
 echo "=========================================================================="
 
 # Configuration
@@ -100,7 +100,7 @@ mkdir -p backend/logs
 
 echo ""
 echo "=========================================================================="
-echo "Starting JobSync Backend Server"
+echo "Starting Joblign Backend Server"
 echo "=========================================================================="
 echo ""
 echo "Server will be available at: http://localhost:${PORT}"
