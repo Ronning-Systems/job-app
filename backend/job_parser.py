@@ -27,13 +27,19 @@ Analyze the job description and return a JSON object with these exact fields:
 - company: The company name (string, required)
 - position: The job title/position (string, required)
 - location: Job location including city, state, and remote status (string)
-- salary: Salary range or compensation info (string)
+- salary: Salary range or compensation info as free text (string). Kept as a fallback for anything that can't be structured.
+- pay_range: Object with the structured compensation details:
+    - min: number or null (lower bound of the range)
+    - max: number or null (upper bound of the range; if only one number is given, put it here and leave min null)
+    - currency: string (ISO currency code; default "USD" if not stated)
+    - period: one of "annual", "hourly", or "monthly" (default "annual" if not stated)
+- application_deadline: ISO date string (YYYY-MM-DD) if an application deadline is mentioned, else null
 - remote: One of "Remote", "Hybrid", "On-site", or "Not specified"
 - description: Cleaned job description text (string)
 - requirements: Object with "must_have" (list of strings) and "nice_to_have" (list of strings)
 - responsibilities: List of key responsibilities (list of strings)
 - keywords: Technical skills and keywords found (list of strings)
-- credentials: Required degrees, certifications, years of experience (list of strings)
+- credentials: Required degrees, certifications, and years of experience (list of strings)
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, just the JSON object.
 
@@ -175,6 +181,8 @@ class JobParser:
             "position": ollama_result.get("position", "Unknown"),
             "location": ollama_result.get("location"),
             "salary": ollama_result.get("salary"),
+            "pay_range": ollama_result.get("pay_range"),
+            "application_deadline": ollama_result.get("application_deadline"),
             "remote": ollama_result.get("remote", "Not specified"),
             "url": url,
             "raw_text": text,
@@ -325,7 +333,9 @@ class JobParser:
             "requirements": self._extract_requirements(text),
             "responsibilities": self._extract_responsibilities(text),
             "keywords": self._extract_keywords(text),
-            "credentials": self._extract_credentials(text)
+            "credentials": self._extract_credentials(text),
+            "pay_range": self._extract_pay_range(text),
+            "application_deadline": self._extract_application_deadline(text),
         }
 
     def _extract_requirements(self, text: str) -> Dict[str, List[str]]:
@@ -402,19 +412,240 @@ class JobParser:
         return found_keywords
 
     def _extract_credentials(self, text: str) -> List[str]:
-        """Extract required credentials, degrees, certifications"""
+        """Extract required credentials, degrees, certifications, and years of experience"""
         credential_patterns = [
-            r"(?:Bachelor|Master|PhD|MBA|Degree)\s+(?:of\s+)?(?:Science|Arts|Engineering)?",
-            r"(?:AWS|Azure|GCP|PMP|CISSP|CPA|CFA|Scrum)\s+(?:Certified|Certification|Certificate)?",
-            r"\d+\+?\s*years?\s+(?:of\s+)?experience",
+            # Degrees — capture the full degree phrase when present
+            r"\b(?:Bachelor(?:'s|s)?|B\.?S\.?|B\.?A\.?|Master(?:'s|s)?|M\.?S\.?|M\.?A\.?|MBA|Ph\.?D\.?|Doctorate|Associate)\s+(?:of\s+|in\s+)?(?:Science|Arts|Engineering|Business|Computer Science)?\s*(?:degree)?\b",
+            r"\b(?:Bachelor|Master|PhD|MBA|Associate|Degree)\s+(?:of\s+|in\s+)?(?:Science|Arts|Engineering)?\s*(?:degree)?\b",
+            # Certifications (named certs)
+            r"\b(?:PE|PMP|CAPM|CISSP|CISM|CISA|CPA|CFA|CCNA|CCNP|CCIE|TOGAF|ITIL(?:\s+v\d)?|Six\s+Sigma(?:\s+(?:Black|Green|Yellow)\s+Belt)?|CSM|PSM(?:\s+I{0,3})?|PSPO|Sec\+|Security\+|Network\+|A\+|CISSP|CompTIA(?:\s+\w+)?|AWS\s+(?:Certified\s+)?(?:Solutions\s+Architect|Developer|SysOps|Cloud\s+Practitioner|DevOps|Data\s+Engineer|Security|Specialty)(?:\s+(?:Associate|Professional|Specialty))?|Azure\s+(?:Certified\s+)?(?:Solutions\s+Architect|Developer|Administrator|Fundamentals|DevOps|Data\s+Engineer|Security)(?:\s+(?:Associate|Expert|Professional|Fundamentals))?|GCP\s+(?:Certified\s+)?(?:Professional\s+)?(?:Cloud\s+Architect|Cloud\s+Engineer|Data\s+Engineer|Cloud\s+Developer|Cloud\s+DevOps|Cloud\s+Network|Cloud\s+Security))\b",
+            # Generic "X Certified" / "X Certification"
+            r"\b[A-Z][A-Za-z0-9+#\.\s]{1,40}?\s+(?:Certified|Certification|Certificate)\b",
+            # Years of experience phrasing
+            r"\b\d+\+?\s*years?\s+(?:of\s+)?(?:relevant\s+|professional\s+)?experience\b",
+            r"\b(?:minimum|at\s+least)\s+\d+\s+years?\s+(?:of\s+)?experience\b",
+            # Licensed/registered
+            r"\b(?:Licensed|Registered)\s+[A-Za-z\s]{3,40}\b",
         ]
 
         credentials = []
         for pattern in credential_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            credentials.extend(matches)
+            for m in matches:
+                cred = m.strip() if isinstance(m, str) else m
+                # Normalize whitespace
+                cred = re.sub(r"\s+", " ", cred).strip()
+                if cred and cred not in credentials:
+                    credentials.append(cred)
 
-        return list(set(credentials))
+        # Deduplicate: drop a credential if it is a substring of another
+        # captured credential (e.g. keep "PMP certification" over "PMP").
+        deduped = []
+        for cred in credentials:
+            cred_lower = cred.lower()
+            if any(
+                cred != other and cred_lower in other.lower()
+                for other in credentials
+            ):
+                continue
+            deduped.append(cred)
+
+        return deduped
+
+    def _extract_pay_range(self, text: str) -> Optional[Dict[str, Any]]:
+        """Extract structured pay range from text.
+
+        Returns a dict with {min, max, currency, period} or None.
+        Detects period: "hourly" if /hr, /hour, or numbers in the 15-300 range
+        with "/hr"; "annual" otherwise (default). Handles "k" suffix as thousands.
+        """
+        if not text:
+            return None
+
+        text_lower = text.lower()
+
+        # Currency detection (default USD). Check more specific symbols first
+        # so that "C$" / "CA$" aren't swallowed by the bare "$" USD rule.
+        currency = "USD"
+        if re.search(r"\b(?:gbp|pounds?|£)\b", text_lower) or "£" in text_lower:
+            currency = "GBP"
+        elif re.search(r"\b(?:eur|euros?|€)\b", text_lower) or "€" in text_lower:
+            currency = "EUR"
+        elif re.search(r"\bcad\b|c\$|ca\$|canadian\s+dollars?", text_lower):
+            currency = "CAD"
+        elif re.search(r"\b(?:usd|us\$|dollars?)\b", text_lower) or "$" in text_lower:
+            currency = "USD"
+
+        # Period detection flags
+        is_hourly = bool(re.search(r"\b(?:/hr|/hour|per\s+hour|an\s+hour|hourly)\b", text_lower))
+        is_monthly = bool(re.search(r"\b(?:/mo|/month|per\s+month|monthly)\b", text_lower))
+
+        # Patterns for salary ranges. Each pattern should capture the numeric parts.
+        # Helper to convert a number token like "80,000" or "80k" to int.
+        def to_int(token: str) -> Optional[int]:
+            token = token.lower().replace(",", "").replace("$", "").strip()
+            if not token:
+                return None
+            k_suffix = token.endswith("k")
+            if k_suffix:
+                token = token[:-1]
+            try:
+                val = float(token)
+            except ValueError:
+                return None
+            if k_suffix:
+                val *= 1000
+            return int(val)
+
+        min_val: Optional[int] = None
+        max_val: Optional[int] = None
+
+        # 1. Explicit range: $80,000 - $120,000 | $80k-$120k | $80-120k | €40,000 - €60,000
+        range_patterns = [
+            r"(?:[\$€£]|C\$|CA\$|US\$|EUR\s|GBP\s|CAD\s)?\s*([\d,]+(?:\.\d+)?k?)\s*[-–to]+\s*(?:[\$€£]|C\$|CA\$|US\$|EUR\s|GBP\s|CAD\s)?\s*([\d,]+(?:\.\d+)?k?)",
+            r"([\d,]+(?:\.\d+)?k?)\s*[-–to]+\s*([\d,]+(?:\.\d+)?k?)\s*(?:/hr|/hour|/year|/yr|/mo|/month)?",
+        ]
+        for pat in range_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                min_val = to_int(m.group(1))
+                max_val = to_int(m.group(2))
+                if min_val is not None and max_val is not None:
+                    break
+
+        # 2. "up to $150k" / "up to $150,000"
+        if min_val is None and max_val is None:
+            m = re.search(r"up\s+to\s*[\$€£]?\s*([\d,]+(?:\.\d+)?k?)", text, re.IGNORECASE)
+            if m:
+                max_val = to_int(m.group(1))
+
+        # 3. Single value with rate: $25/hr, $50/hour
+        if min_val is None and max_val is None:
+            m = re.search(r"[\$€£]\s*([\d,]+(?:\.\d+)?)\s*(?:/hr|/hour|per\s+hour|an\s+hour)", text, re.IGNORECASE)
+            if m:
+                max_val = to_int(m.group(1))
+                is_hourly = True
+
+        # 4. "Salary: $90,000" / "Salary: $90k"
+        if min_val is None and max_val is None:
+            m = re.search(r"salary\s*[:\-]?\s*[\$€£]?\s*([\d,]+(?:\.\d+)?k?)", text, re.IGNORECASE)
+            if m:
+                max_val = to_int(m.group(1))
+
+        # 5. Bare "$90,000" / "$90k"
+        if min_val is None and max_val is None:
+            m = re.search(r"[\$€£]\s*([\d,]+(?:\.\d+)?k?)", text, re.IGNORECASE)
+            if m:
+                max_val = to_int(m.group(1))
+
+        if min_val is None and max_val is None:
+            return None
+
+        # Determine period
+        if is_hourly:
+            period = "hourly"
+        elif is_monthly:
+            period = "monthly"
+        else:
+            # Heuristic: if max is in the 15-300 range and there's an hourly-ish cue, treat as hourly
+            if max_val is not None and 15 <= max_val <= 300 and re.search(r"/hr|/hour", text_lower):
+                period = "hourly"
+            else:
+                period = "annual"
+
+        return {
+            "min": min_val,
+            "max": max_val,
+            "currency": currency,
+            "period": period,
+        }
+
+    def _extract_application_deadline(self, text: str) -> Optional[str]:
+        """Extract application deadline from text.
+
+        Looks for phrases like "apply by", "deadline", "closes on",
+        "applications close", "apply before" followed by a date.
+        Returns an ISO YYYY-MM-DD string or None.
+        """
+        if not text:
+            return None
+
+        months = {
+            "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+            "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+            "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10, "oct": 10,
+            "november": 11, "nov": 11, "december": 12, "dec": 12,
+        }
+
+        trigger = r"(?:apply\s+by|deadline(?:\s+is)?|closes?\s+on|applications?\s+close|apply\s+before|application\s+deadline|closing\s+date)"
+
+        # Try to find a date near a trigger phrase
+        # Date formats we support
+        date_patterns = [
+            (r"(\d{4})-(\d{1,2})-(\d{1,2})", "ymd_dash"),          # 2026-08-15
+            (r"(\d{1,2})/(\d{1,2})/(\d{4})", "mdy_slash"),          # 08/15/2026
+            (r"(\d{1,2})-(\d{1,2})-(\d{4})", "mdy_dash"),           # 08-15-2026
+            (r"(\d{{1,2}})\s+({m})\s+(\d{{4}})".format(m="|".join(months.keys())), "dmy_text"),
+            (r"({m})\s+(\d{{1,2}}),?\s+(\d{{4}})".format(m="|".join(months.keys())), "mdy_text"),
+        ]
+
+        # Build a combined search: find the trigger, then look for a date within ~40 chars after it
+        for t_match in re.finditer(trigger, text, re.IGNORECASE):
+            start = t_match.end()
+            window = text[start:start + 60]
+            for pat, kind in date_patterns:
+                m = re.search(pat, window, re.IGNORECASE)
+                if not m:
+                    continue
+                try:
+                    if kind == "ymd_dash":
+                        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    elif kind == "mdy_slash" or kind == "mdy_dash":
+                        mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    elif kind == "dmy_text":
+                        d = int(m.group(1))
+                        mo = months[m.group(2).lower()]
+                        y = int(m.group(3))
+                    elif kind == "mdy_text":
+                        mo = months[m.group(1).lower()]
+                        d = int(m.group(2))
+                        y = int(m.group(3))
+                    else:
+                        continue
+                    if not (1 <= mo <= 12 and 1 <= d <= 31):
+                        continue
+                    return f"{y:04d}-{mo:02d}-{d:02d}"
+                except (ValueError, KeyError):
+                    continue
+
+        # Fallback: a bare ISO date in the text preceded by any deadline-ish word
+        for pat, kind in date_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                # Only accept if near a deadline cue
+                ctx_start = max(0, m.start() - 80)
+                ctx = text[ctx_start:m.end()].lower()
+                if re.search(r"deadline|clos|apply|application", ctx):
+                    try:
+                        if kind == "ymd_dash":
+                            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                        elif kind == "mdy_slash" or kind == "mdy_dash":
+                            mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                        elif kind == "dmy_text":
+                            d = int(m.group(1))
+                            mo = months[m.group(2).lower()]
+                            y = int(m.group(3))
+                        elif kind == "mdy_text":
+                            mo = months[m.group(1).lower()]
+                            d = int(m.group(2))
+                            y = int(m.group(3))
+                        else:
+                            continue
+                        if 1 <= mo <= 12 and 1 <= d <= 31:
+                            return f"{y:04d}-{mo:02d}-{d:02d}"
+                    except (ValueError, KeyError):
+                        continue
+
+        return None
 
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text"""

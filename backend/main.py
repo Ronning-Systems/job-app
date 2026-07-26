@@ -39,7 +39,10 @@ from models import (
     Job,
     JobApplication,
     BaseResume,
+    BaseCoverLetter,
     GeneratedResume,
+    GeneratedCoverLetter,
+    ArtifactScore,
     SessionLocal,
     User,
     generate_public_job_id,
@@ -131,6 +134,11 @@ class JobResponse(BaseModel):
     position: str
     location: Optional[str]
     salary: Optional[str]
+    pay_range_min: Optional[int] = None
+    pay_range_max: Optional[int] = None
+    pay_currency: Optional[str] = "USD"
+    pay_period: Optional[str] = None
+    application_deadline: Optional[datetime] = None
     remote: Optional[str]
     job_url: Optional[str]
     stage: str
@@ -142,6 +150,7 @@ class JobResponse(BaseModel):
     resume_revisions: Optional[list] = []
     structured_content: Optional[dict] = None
     atoms_snapshot: Optional[list] = None
+    has_cover_letter: bool = False
     created_at: datetime
 
     class Config:
@@ -156,6 +165,8 @@ class JobDetailResponse(JobResponse):
     required_credentials: Optional[list]
     history: Optional[list]
     generated_resume: Optional[str]
+    cover_letter: Optional[str] = None
+    cover_letter_revisions: Optional[list] = []
 
 
 
@@ -185,6 +196,16 @@ async def create_job(
             status_code=500, detail=f"Failed to parse job text: {str(e)}"
         )
 
+    # Extract structured pay range + deadline from parsed data (if present)
+    pay_range = job_data.get("pay_range") or {}
+    deadline_str = job_data.get("application_deadline")
+    application_deadline = None
+    if deadline_str:
+        try:
+            application_deadline = datetime.fromisoformat(deadline_str)
+        except (ValueError, TypeError):
+            application_deadline = None
+
     # Create Job record
     job = Job(
         public_job_id=_generate_unique_public_job_id(db),
@@ -193,6 +214,11 @@ async def create_job(
         position=job_data.get("position", "Unknown"),
         location=job_data.get("location"),
         salary=job_data.get("salary"),
+        pay_range_min=pay_range.get("min"),
+        pay_range_max=pay_range.get("max"),
+        pay_currency=pay_range.get("currency", "USD"),
+        pay_period=pay_range.get("period"),
+        application_deadline=application_deadline,
         remote=job_data.get("remote"),
         job_url=input_data.url or job_data.get("url"),
         job_description_raw=job_data.get("raw_text", input_data.job_text),
@@ -232,10 +258,16 @@ async def create_job(
 def list_jobs(
     stage: Optional[str] = None,
     search: Optional[str] = None,
+    sort: Optional[str] = None,
+    order: Optional[str] = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all jobs for the current user with optional filtering"""
+    """List all jobs for the current user with optional filtering + sorting.
+
+    sort ∈ {company, position, location, stage, applied_date, deadline, pay, created}.
+    order ∈ {asc, desc} (default desc).
+    """
     query = db.query(Job, JobApplication).join(
         JobApplication, Job.id == JobApplication.job_id
     ).filter(Job.user_id == current_user.id)
@@ -251,7 +283,22 @@ def list_jobs(
             | (Job.location.ilike(search_filter))
         )
 
-    results = query.order_by(Job.created_at.desc()).all()
+    # Sorting
+    sort_map = {
+        "company": Job.company,
+        "position": Job.position,
+        "location": Job.location,
+        "stage": JobApplication.stage,
+        "applied_date": JobApplication.applied_date,
+        "deadline": Job.application_deadline,
+        "pay": Job.pay_range_max,
+        "created": Job.created_at,
+    }
+    sort_col = sort_map.get(sort, Job.created_at)
+    if order and order.lower() == "asc":
+        results = query.order_by(sort_col.asc()).all()
+    else:
+        results = query.order_by(sort_col.desc()).all()
 
     return [format_job_response(job, app, db) for job, app in results]
 
@@ -1209,10 +1256,12 @@ def format_job_response(
         # If requirements is not a dict, create empty structure
         requirements = {"must_have": [], "nice_to_have": []}
 
-    # Get latest generated resume
+    # Get latest generated resume + cover letter
     generated_resume = None
     resume_revisions = []
     latest_resume = None
+    cover_letter = None
+    cover_letter_revisions = []
     if db:
         latest_resume = (
             db.query(GeneratedResume)
@@ -1224,6 +1273,16 @@ def format_job_response(
             generated_resume = latest_resume.current_content
             resume_revisions = latest_resume.revisions or []
 
+        latest_cover_letter = (
+            db.query(GeneratedCoverLetter)
+            .filter(GeneratedCoverLetter.job_id == job.id)
+            .order_by(GeneratedCoverLetter.created_at.desc())
+            .first()
+        )
+        if latest_cover_letter:
+            cover_letter = latest_cover_letter.current_content
+            cover_letter_revisions = latest_cover_letter.revisions or []
+
     return {
         "id": job.id,
         "public_job_id": job.public_job_id,
@@ -1231,6 +1290,11 @@ def format_job_response(
         "position": job.position,
         "location": job.location,
         "salary": job.salary,
+        "pay_range_min": job.pay_range_min,
+        "pay_range_max": job.pay_range_max,
+        "pay_currency": job.pay_currency,
+        "pay_period": job.pay_period,
+        "application_deadline": job.application_deadline,
         "remote": job.remote,
         "job_url": job.job_url,
         "stage": application.stage,
@@ -1250,7 +1314,507 @@ def format_job_response(
         "resume_revisions": resume_revisions,
         "structured_content": latest_resume.structured_content if latest_resume else None,
         "atoms_snapshot": latest_resume.atoms_snapshot if latest_resume else None,
+        "has_cover_letter": cover_letter is not None,
+        "cover_letter": cover_letter,
+        "cover_letter_revisions": cover_letter_revisions,
     }
+
+
+# ---- Base cover letter CRUD (parallel to base resumes) ----------------
+
+class BaseCoverLetterCreate(BaseModel):
+    name: str
+    letter_type: str = "example"  # only 'example' in v1
+    content: str  # Base64 encoded file content
+
+
+@app.post("/api/cover-letters/base")
+def create_base_cover_letter(letter: BaseCoverLetterCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Upload an example cover letter (voice/tone reference)."""
+    base = BaseCoverLetter(
+        name=letter.name,
+        letter_type=letter.letter_type,
+        content=letter.content,
+        source="upload",
+        user_id=current_user.id,
+    )
+    db.add(base)
+    db.commit()
+    db.refresh(base)
+    return {"id": base.id, "name": base.name, "letter_type": base.letter_type, "created_at": base.created_at.isoformat()}
+
+
+@app.get("/api/cover-letters/base")
+def list_base_cover_letters(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List all example cover letters for the current user."""
+    letters = db.query(BaseCoverLetter).filter(BaseCoverLetter.user_id == current_user.id).all()
+    return [
+        {
+            "id": l.id,
+            "name": l.name,
+            "letter_type": l.letter_type,
+            "created_at": l.created_at.isoformat() if l.created_at else None,
+        }
+        for l in letters
+    ]
+
+
+@app.delete("/api/cover-letters/base/{letter_id}")
+def delete_base_cover_letter(letter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Delete an example cover letter."""
+    letter = db.query(BaseCoverLetter).filter(
+        BaseCoverLetter.id == letter_id,
+        BaseCoverLetter.user_id == current_user.id,
+    ).first()
+    if not letter:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    db.delete(letter)
+    db.commit()
+    return {"message": "Cover letter deleted"}
+
+
+# ---- Cover letter generation + revision (background) -----------------
+
+async def _do_generate_cover_letter(job_id: int, user_id: int, job_description: str, resume_content: Optional[str], example_cover_letters: list, target_role: Optional[str], company: Optional[str], position: Optional[str], model_override: Optional[str]):
+    """Background cover letter generation (mirrors _do_generate_resume)."""
+    db = SessionLocal()
+    try:
+        _progress(job_id, "Generating cover letter", 25)
+        result = await agent_service.generate_cover_letter(
+            job_description=job_description,
+            resume_content=resume_content,
+            example_cover_letters=example_cover_letters,
+            target_role=target_role,
+            company=company,
+            position=position,
+            model_override=model_override,
+        )
+        if "error" in result:
+            _set_generation_status(job_id, "error", error=result["error"], step="Error", percent=0)
+            return
+
+        content = result.get("content", "")
+        _progress(job_id, "Saving cover letter", 85)
+
+        existing = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).first()
+        if existing:
+            revisions = list(existing.revisions or [])
+            max_version = max((r.get("version", 0) for r in revisions if isinstance(r, dict)), default=0)
+            next_version = max_version + 1
+            revisions.append({
+                "version": next_version,
+                "content": content,
+                "model": result.get("model_used"),
+                "feedback": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            existing.current_content = content
+            existing.revisions = revisions
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(existing, "revisions")
+            existing.updated_at = datetime.utcnow()
+            generated = existing
+        else:
+            revisions = [{
+                "version": 1,
+                "content": content,
+                "model": result.get("model_used"),
+                "feedback": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            }]
+            generated = GeneratedCoverLetter(
+                job_id=job_id,
+                user_id=user_id,
+                current_content=content,
+                revisions=revisions,
+            )
+            db.add(generated)
+
+        db.commit()
+        db.refresh(generated)
+        _set_generation_status(job_id, "completed", cover_letter_id=generated.id, version=len(generated.revisions), step="Done", percent=100)
+    except Exception as e:
+        logger.error(f"[generate-cover-letter-bg] Error for job {job_id}: {e}", exc_info=True)
+        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
+    finally:
+        db.close()
+
+
+@app.post("/api/jobs/{job_id}/generate-cover-letter")
+async def generate_job_cover_letter(job_id: int, request: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Generate a cover letter for a job. Runs in background; poll /generate-cover-letter/status."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_description = job.job_description_parsed or job.job_description_raw
+
+    # Pull the latest generated resume to use as content reference
+    latest_resume = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).order_by(GeneratedResume.updated_at.desc()).first()
+    resume_content = latest_resume.current_content if latest_resume else None
+
+    # Example cover letters from DB unless provided in request
+    example_cover_letters = request.get("example_cover_letters", [])
+    if not example_cover_letters:
+        letters_db = db.query(BaseCoverLetter).filter(BaseCoverLetter.user_id == current_user.id).all()
+        example_cover_letters = [{"name": l.name, "content": l.content} for l in letters_db]
+
+    model_override = request.get("model")
+
+    _set_generation_status(job_id, "processing", step="Queued", percent=0)
+    background_tasks.add_task(
+        _do_generate_cover_letter,
+        job_id=job_id,
+        user_id=current_user.id,
+        job_description=job_description,
+        resume_content=resume_content,
+        example_cover_letters=example_cover_letters,
+        target_role=job.position,
+        company=job.company,
+        position=job.position,
+        model_override=model_override,
+    )
+    return {"job_id": job_id, "status": "processing"}
+
+
+@app.get("/api/jobs/{job_id}/generate-cover-letter/status")
+async def get_generate_cover_letter_status(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Poll for background cover letter generation status."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = _generation_status.get(job_id, {"status": "unknown"})
+    if status.get("status") == "completed":
+        latest = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).order_by(GeneratedCoverLetter.updated_at.desc()).first()
+        if latest:
+            return {
+                "status": "completed",
+                "job_id": job_id,
+                "cover_letter": latest.current_content,
+                "cover_letter_id": latest.id,
+                "version": len(latest.revisions) if latest.revisions else 1,
+                "revisions": latest.revisions or [],
+            }
+    return status
+
+
+@app.post("/api/jobs/{job_id}/revise-cover-letter")
+async def revise_job_cover_letter(job_id: int, request: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Revise a generated cover letter based on user feedback. Appends a new revision."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    feedback = request.get("feedback", "")
+    if not feedback:
+        raise HTTPException(status_code=400, detail="Feedback is required")
+
+    existing = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).first()
+    if not existing or not existing.current_content:
+        raise HTTPException(status_code=404, detail="No generated cover letter found. Generate one first.")
+
+    # Pull the latest resume for fact reference
+    latest_resume = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).order_by(GeneratedResume.updated_at.desc()).first()
+    resume_content = latest_resume.current_content if latest_resume else None
+
+    model_override = request.get("model")
+    result = await agent_service.revise_cover_letter(
+        current_content=existing.current_content,
+        feedback=feedback,
+        job_description=job.job_description_parsed or job.job_description_raw,
+        resume_content=resume_content,
+        target_role=job.position,
+        model_override=model_override,
+    )
+
+    if "error" in result and not result.get("content"):
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    content = result.get("content", "")
+    from sqlalchemy.orm.attributes import flag_modified
+    revisions = list(existing.revisions or [])
+    max_version = max((r.get("version", 0) for r in revisions if isinstance(r, dict)), default=0)
+    next_version = max_version + 1
+    revisions.append({
+        "version": next_version,
+        "content": content,
+        "model": result.get("model_used"),
+        "feedback": feedback,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    existing.current_content = content
+    existing.revisions = revisions
+    flag_modified(existing, "revisions")
+    existing.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "job_id": job_id,
+        "cover_letter": content,
+        "cover_letter_id": existing.id,
+        "version": next_version,
+        "revisions": revisions,
+    }
+
+
+@app.delete("/api/jobs/{job_id}/cover-letter")
+def delete_job_cover_letter(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Delete the generated cover letter for a job."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    existing = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="No cover letter found")
+    db.delete(existing)
+    db.commit()
+    return {"message": "Cover letter deleted"}
+
+
+# ---- Scoring agents: ATS + industry panel -----------------------------
+
+async def _do_score(job_id: int, user_id: int, artifact_type: str, artifact_id: int, score_type: str, artifact_content: str, job_description: str, target_role: Optional[str]):
+    """Background scoring (ATS or industry panel) for a resume or cover letter."""
+    db = SessionLocal()
+    try:
+        _set_generation_status(job_id, "processing", step=f"Scoring ({score_type})", percent=10)
+        if score_type == "ats":
+            result = await agent_service.score_ats(artifact_type, artifact_content, job_description)
+        else:
+            result = await agent_service.score_industry_panel(artifact_type, artifact_content, job_description, target_role)
+
+        score = ArtifactScore(
+            job_id=job_id,
+            user_id=user_id,
+            artifact_type=artifact_type,
+            artifact_id=artifact_id,
+            score_type=score_type,
+            scores=result.get("scores", {}),
+            issues=result.get("issues", []),
+            recommendations=result.get("recommendations", []),
+            model_used=result.get("model_used"),
+        )
+        db.add(score)
+        db.commit()
+        db.refresh(score)
+        _set_generation_status(job_id, "completed", score_id=score.id, score_type=score_type, step="Done", percent=100)
+    except Exception as e:
+        logger.error(f"[score-bg] Error {score_type} for job {job_id}: {e}", exc_info=True)
+        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
+    finally:
+        db.close()
+
+
+def _resolve_artifact_for_scoring(db: Session, job_id: int, artifact_type: str, artifact_id: Optional[int]):
+    """Return (artifact_id, content) for the latest resume or cover letter on the job."""
+    if artifact_type == "cover_letter":
+        artifact = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).order_by(GeneratedCoverLetter.updated_at.desc()).first()
+    else:
+        artifact = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).order_by(GeneratedResume.updated_at.desc()).first()
+    if not artifact:
+        return None, None
+    return (artifact_id or artifact.id), artifact.current_content
+
+
+@app.post("/api/jobs/{job_id}/resumes/{resume_id}/score-ats")
+async def score_resume_ats(job_id: int, resume_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Run ATS scoring on a resume."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    resume = db.query(GeneratedResume).filter(GeneratedResume.id == resume_id, GeneratedResume.job_id == job_id).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    _set_generation_status(job_id, "processing", step="Scoring (ats)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="ats", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    return {"job_id": job_id, "status": "processing", "score_type": "ats"}
+
+
+@app.post("/api/jobs/{job_id}/resumes/{resume_id}/score-industry-panel")
+async def score_resume_panel(job_id: int, resume_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Run industry panel scoring on a resume."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    resume = db.query(GeneratedResume).filter(GeneratedResume.id == resume_id, GeneratedResume.job_id == job_id).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    _set_generation_status(job_id, "processing", step="Scoring (industry_panel)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="industry_panel", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    return {"job_id": job_id, "status": "processing", "score_type": "industry_panel"}
+
+
+@app.post("/api/jobs/{job_id}/cover-letters/{cl_id}/score-ats")
+async def score_cover_letter_ats(job_id: int, cl_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Run ATS scoring on a cover letter."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cl = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.id == cl_id, GeneratedCoverLetter.job_id == job_id).first()
+    if not cl:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    _set_generation_status(job_id, "processing", step="Scoring (ats)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="ats", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    return {"job_id": job_id, "status": "processing", "score_type": "ats"}
+
+
+@app.post("/api/jobs/{job_id}/cover-letters/{cl_id}/score-industry-panel")
+async def score_cover_letter_panel(job_id: int, cl_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Run industry panel scoring on a cover letter."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cl = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.id == cl_id, GeneratedCoverLetter.job_id == job_id).first()
+    if not cl:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    _set_generation_status(job_id, "processing", step="Scoring (industry_panel)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="industry_panel", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    return {"job_id": job_id, "status": "processing", "score_type": "industry_panel"}
+
+
+@app.get("/api/jobs/{job_id}/scores")
+def get_job_scores(job_id: int, artifact_type: Optional[str] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get the latest ATS + industry-panel scores for a job's resume and/or cover letter."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    query = db.query(ArtifactScore).filter(ArtifactScore.job_id == job_id)
+    if artifact_type:
+        query = query.filter(ArtifactScore.artifact_type == artifact_type)
+    scores = query.order_by(ArtifactScore.created_at.desc()).all()
+    # Return latest per (artifact_type, artifact_id, score_type)
+    seen = {}
+    out = []
+    for s in scores:
+        key = (s.artifact_type, s.artifact_id, s.score_type)
+        if key in seen:
+            continue
+        seen[key] = True
+        out.append({
+            "id": s.id,
+            "artifact_type": s.artifact_type,
+            "artifact_id": s.artifact_id,
+            "score_type": s.score_type,
+            "scores": s.scores,
+            "issues": s.issues,
+            "recommendations": s.recommendations,
+            "model_used": s.model_used,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+    return out
+
+
+# ---- URL-only job creation (httpx first, fetcher sidecar fallback) ----
+
+@app.post("/api/jobs/from-url")
+async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Fetch a job posting from a URL, parse it, and create the job in one call.
+
+    Tries direct httpx first; on 403/blocked or empty parse, falls back to the
+    fetcher sidecar (FETCHER_URL env var, default http://fetcher:8080) which
+    renders with a headless browser.
+    """
+    url = request.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    is_safe, reason = is_url_safe(url)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"URL is not safe to fetch: {reason}")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    html_content = None
+    fetch_error = None
+
+    # Attempt 1: direct httpx
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            html_content = response.text
+    except httpx.HTTPStatusError as e:
+        fetch_error = f"HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        fetch_error = f"network: {str(e)}"
+    except Exception as e:
+        fetch_error = str(e)
+
+    # Attempt 2: fetcher sidecar fallback (Playwright) on 403/blocked/empty
+    fetcher_url = os.getenv("FETCHER_URL", "http://fetcher:8080")
+    if (not html_content or fetch_error) and fetcher_url:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                r = await client.post(f"{fetcher_url}/fetch", json={"url": url}, headers={"Content-Type": "application/json"})
+                r.raise_for_status()
+                data = r.json()
+                html_content = data.get("html")
+                fetch_error = None
+        except Exception as e:
+            # If the sidecar isn't reachable, keep the original error
+            if not fetch_error:
+                fetch_error = f"fetcher sidecar: {str(e)}"
+
+    if not html_content:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {fetch_error or 'empty response'}")
+
+    parser = JobParser()
+    try:
+        job_data = await parser.parse_from_html(html_content, url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse fetched page: {str(e)}")
+
+    # Extract structured pay range + deadline
+    pay_range = job_data.get("pay_range") or {}
+    deadline_str = job_data.get("application_deadline")
+    application_deadline = None
+    if deadline_str:
+        try:
+            application_deadline = datetime.fromisoformat(deadline_str)
+        except (ValueError, TypeError):
+            application_deadline = None
+
+    job = Job(
+        public_job_id=_generate_unique_public_job_id(db),
+        user_id=current_user.id,
+        company=job_data.get("company", "Unknown"),
+        position=job_data.get("position", "Unknown"),
+        location=job_data.get("location"),
+        salary=job_data.get("salary"),
+        pay_range_min=pay_range.get("min"),
+        pay_range_max=pay_range.get("max"),
+        pay_currency=pay_range.get("currency", "USD"),
+        pay_period=pay_range.get("period"),
+        application_deadline=application_deadline,
+        remote=job_data.get("remote"),
+        job_url=url,
+        job_description_raw=job_data.get("raw_text") or job_data.get("description"),
+        job_description_parsed=job_data.get("description"),
+        requirements=job_data.get("requirements", {}),
+        responsibilities=job_data.get("responsibilities", []),
+        keywords=job_data.get("keywords", []),
+        required_credentials=job_data.get("credentials", []),
+        source_type="url",
+        source_url=url,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    application = JobApplication(
+        job_id=job.id,
+        user_id=current_user.id,
+        stage="saved",
+        history=[{"date": datetime.utcnow().isoformat(), "action": "job_added", "notes": "Job added from URL"}],
+    )
+    db.add(application)
+    db.commit()
+
+    return format_job_response(job, application, db)
 
 
 # Agent endpoints

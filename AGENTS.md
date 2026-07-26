@@ -24,7 +24,7 @@ has stated explicitly. Read this before taking action that might conflict.
 the deploy orchestrator.** The canonical deploy is
 `my-stack/deploy-patrick-mini.sh`, which builds the image on
 `patrick-mini` via `docker buildx`, renders the Traefik config and the
-four compose stacks with `envsubst`, and brings them up with
+five compose stacks with `envsubst`, and brings them up with
 `docker compose -p <name> up -d`.
 
 To redeploy after edits to `job-app`:
@@ -72,3 +72,43 @@ ops conventions.
   Portainer / patrick-mini deploy spec
   (`2026-07-18-portainer-deploy-design.md`) describes the architecture
   still in use today. Older Cloud Run specs/plans are historical only.
+
+## New tables, agents, and routes (2026-07-25 redesign)
+
+- **New tables** (in `backend/models.py`):
+  - `BaseCoverLetter` — example cover letters for voice/tone (v1 has no
+    template/DOCX variant; `letter_type='example'` only).
+  - `GeneratedCoverLetter` — one row per job; mirrors `GeneratedResume`
+    with versioned `revisions` (each carries the feedback that produced it).
+  - `ArtifactScore` — persisted ATS + industry-panel scores for BOTH
+    resumes and cover letters. Polymorphic via `artifact_type`
+    (`'resume'` | `'cover_letter'`) + soft-FK `artifact_id`; no DB-level
+    FK so deleting an artifact doesn't orphan-block. Index on
+    `(artifact_type, artifact_id, score_type)`.
+- **New agent prompts** (in `agents/`):
+  - `cover-letter-generator.md` — generation + revision in one prompt
+    (revision mode preserves unchanged content; do not fabricate beyond
+    the resume).
+  - `industry-panel.md` — 4 personas (engineering/technical leader,
+    product leader, domain expert, recruiter) in a single LLM call;
+    returns per-persona scores + composite + strengths/gaps + a
+    `recommendation` ∈ {strong yes, yes, maybe, no, strong no}.
+  - `ats-expert.md` — extended to return structured JSON scores
+    (overall/parseability/keyword_match/search_relevance, 0-10) consumed
+    by `ArtifactScore`.
+- **URL-only entry:** `POST /api/jobs/from-url` fetches → parses →
+  creates a job in one call. Tries httpx first, falls back to the
+  fetcher sidecar (Playwright+chromium) for blocked boards (LinkedIn,
+  Indeed).
+- **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
+  headless-browser sidecar. The sidecar itself is owned by `my-stack`
+  (`portainer/stacks/fetcher.yml`), not this repo — this repo just calls
+  it. Internal-only; not exposed by Traefik. The 4-stack deploy became 5
+  (network → traefik → fetcher → vault → jobapp).
+- **Parser extensions** in `backend/job_parser.py`:
+  `_extract_pay_range`, `_extract_application_deadline`, improved
+  `_extract_credentials`. Structured pay range (`pay_range_min/max`,
+  `pay_currency`, `pay_period`) + `application_deadline` are stored on
+  the `Job` and are sortable; no deadline reminders/badges in v1.
+- **Sort-by-attribute:** `GET /api/jobs?sort=company|position|location|
+  stage|applied_date|deadline|pay|created&order=asc|desc`.

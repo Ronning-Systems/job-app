@@ -16,19 +16,30 @@ tailored cover letters, and align your resume to each role.
 - Track jobs through 9 stages: Saved, Applied, Phone Screen, Interview, Executive Call, Offered, Rejected, Withdrawn, Closed
 - Add jobs via URL (auto-fetches and parses job details) or plain text
 - Store job descriptions, requirements, and extracted keywords
+- Structured pay range + application deadline parsed from postings (sortable; no deadline reminders in v1)
+- Sort-by-attribute on the jobs list (company, position, location, stage, applied_date, deadline, pay, created)
 - History tracking with automatic stage change logging
 
 ### Resume Management
 - Create and manage multiple resumes (example and template types)
 - ATS optimization via ATS Expert Agent
 - Technical fit analysis via Technical Hiring Manager Agent
+- Industry panel review (4 personas, single LLM call) via Industry Panel Agent
 - Resume generation tailored to specific jobs using example resumes and templates
+
+### Cover Letter Management
+- Upload example cover letters (voice/tone reference for the generator)
+- Generate tailored cover letters grounded in the candidate's resume and the job description
+- Revision via text feedback (appends a versioned revision)
+- ATS + industry panel scoring for cover letters too
 
 ### AI Agents
 - **Job Description Parser**: Parses job postings from URLs or text via Ollama Cloud
-- **ATS Expert Agent**: Analyzes resumes for ATS compatibility and keyword matching
+- **ATS Expert Agent**: Analyzes resumes or cover letters for ATS compatibility and keyword matching (structured scores persisted)
 - **Technical Hiring Manager Agent**: Evaluates technical fit against job requirements
+- **Industry Panel Agent**: Simulates 4 reviewers (engineering/technical leader, product leader, domain expert, recruiter) in a single call; returns composite + per-persona scores + recommendation
 - **Resume Generator Agent**: Creates tailored resumes using example resumes and templates
+- **Cover Letter Generator Agent**: Creates tailored cover letters grounded in the resume; revises on feedback
 
 ## Architecture
 
@@ -47,18 +58,33 @@ tailored cover letters, and align your resume to each role.
 │  │                                          │          │
 │  │  /api/*       → backend routes           │          │
 │  │  /            → static/index.html        │          │
-│  │  /api/fetch-job → URL fetching           │          │
+│  │  /api/jobs/from-url → URL fetch + parse  │          │
 │  │                                          │          │
 │  │  Env from Vault (secret materializer):   │          │
 │  │    DATABASE_URL  → postgres service      │          │
 │  │    MODEL_ENDPOINT → Ollama Cloud         │          │
 │  │    AUTH0_*  → Auth0                      │          │
+│  │    FETCHER_URL → fetcher sidecar         │          │
 │  └──────────┬─────────────────┬────────────┘          │
 │             │                 │                        │
 │  ┌──────────▼─────┐  ┌───────▼──────────────┐         │
 │  │  Postgres 16   │  │  Vault (secrets KV)  │         │
 │  │  (jobapp PG)    │  │  jobapp/prod path    │         │
-│  └────────────────┘  └──────────────────────┘         │
+│  │  tables:       │  └──────────────────────┘         │
+│  │   users, jobs, │                                    │
+│  │   job_applications,                              │
+│  │   base_resumes,                                  │
+│  │   generated_resumes,                             │
+│  │   base_cover_letters,                           │
+│  │   generated_cover_letters,                      │
+│  │   artifact_scores                                │
+│  └────────────────┘         ┌──────────────────┐    │
+│                              │  fetcher sidecar  │    │
+│                              │  (Playwright+     │    │
+│                              │   chromium)       │    │
+│                              │  internal-only,   │    │
+│                              │  not in Traefik   │    │
+│                              └──────────────────┘    │
 └────────────────────────────────────────────────────────┘
           │
           │ HTTPS (MODEL_ENDPOINT)
@@ -83,8 +109,9 @@ tailored cover letters, and align your resume to each role.
 ### API Endpoints
 
 #### Jobs
-- `POST /api/jobs` - Create a new job (from URL or text)
-- `GET /api/jobs` - List all jobs (with optional stage/search filters)
+- `POST /api/jobs` - Create a new job (from text)
+- `POST /api/jobs/from-url` - Fetch, parse, and create a job from a URL in one call (httpx first, fetcher sidecar fallback)
+- `GET /api/jobs` - List all jobs (with optional stage/search filters + sort/order)
 - `GET /api/jobs/{id}` - Get job details
 - `PUT /api/jobs/{id}` - Update job
 - `DELETE /api/jobs/{id}` - Delete job
@@ -94,11 +121,30 @@ tailored cover letters, and align your resume to each role.
 - `POST /api/resumes/base` - Upload a base resume (example or template)
 - `GET /api/resumes/base` - List base resumes
 - `DELETE /api/resumes/base/{id}` - Delete a base resume
+- `POST /api/jobs/{id}/generate-resume` - Generate a tailored resume (background + progress poll)
+- `GET /api/jobs/{id}/generate-resume/status` - Poll resume generation status
+- `POST /api/jobs/{id}/revise-resume` - Revise a generated resume from feedback
+
+#### Cover Letters
+- `POST /api/cover-letters/base` - Upload an example cover letter (voice/tone reference)
+- `GET /api/cover-letters/base` - List base cover letters
+- `DELETE /api/cover-letters/base/{id}` - Delete a base cover letter
+- `POST /api/jobs/{id}/generate-cover-letter` - Generate a cover letter (background + progress poll)
+- `GET /api/jobs/{id}/generate-cover-letter/status` - Poll cover letter generation status
+- `POST /api/jobs/{id}/revise-cover-letter` - Revise a cover letter from feedback (appends a versioned revision)
+- `DELETE /api/jobs/{id}/cover-letter` - Delete a job's generated cover letter
+
+#### Scoring (ATS + Industry Panel)
+- `POST /api/jobs/{id}/resumes/{resume_id}/score-ats` - ATS-score a resume
+- `POST /api/jobs/{id}/resumes/{resume_id}/score-industry-panel` - Industry-panel-score a resume
+- `POST /api/jobs/{id}/cover-letters/{cl_id}/score-ats` - ATS-score a cover letter
+- `POST /api/jobs/{id}/cover-letters/{cl_id}/score-industry-panel` - Industry-panel-score a cover letter
+- `GET /api/jobs/{id}/scores` - Latest ATS + industry-panel scores for a job's resume/cover letter
 
 #### Agents
 - `POST /api/agents/ats-analysis` - ATS analysis
 - `POST /api/agents/technical-fit` - Technical fit analysis
-- `POST /api/jobs/{id}/generate-resume` - Generate a tailored resume
+- `POST /api/agents/generate-resume` - Generate a tailored resume
 
 #### Other
 - `POST /api/fetch-job` - Fetch and parse a job posting from a URL
@@ -147,6 +193,7 @@ Without `DATABASE_URL` set, the app falls back to SQLite. Without `OLLAMA_API_KE
 | `AUTH0_DOMAIN` | Auth0 tenant domain | (empty = local dev bypass) |
 | `AUTH0_AUDIENCE` | Auth0 API identifier (opaque, do not rename) | `https://jobsync/api` |
 | `CORS_ORIGIN` | Comma-separated allowed origins | `http://localhost:8765,https://joblign.ronning.systems` |
+| `FETCHER_URL` | Headless-browser sidecar for blocked job boards (Playwright+chromium, owned by my-stack, internal-only) | `http://fetcher:8080` |
 
 ## Deployment
 
@@ -164,7 +211,7 @@ git add -A && git commit -m "<message>" && git push origin main
 
 The script builds the image on `patrick-mini` via `docker buildx`, renders
 the Traefik config and compose files with `envsubst`, and brings up the
-four stacks (network → traefik → vault → jobapp) with `docker compose`.
+five stacks (network → traefik → fetcher → vault → jobapp) with `docker compose`.
 
 ### Production URL
 
@@ -203,7 +250,10 @@ job-app/
 │   ├── ats-expert.md
 │   ├── resume-generator.md
 │   ├── hr-professional.md
-│   └── tech-hiring-manager.md
+│   ├── tech-hiring-manager.md
+│   ├── technical-hiring-manager.md
+│   ├── cover-letter-generator.md   # Cover letter generation + revision
+│   └── industry-panel.md           # 4-persona industry panel scoring
 │
 ├── mcp_server.py              # Standalone MCP server (local dev only)
 ├── run_local.sh               # Local dev server (SQLite, hot reload)

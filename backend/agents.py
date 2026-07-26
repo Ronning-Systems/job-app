@@ -920,6 +920,8 @@ Output the JSON now:"""
             "position": result.get("position", "Unknown"),
             "location": result.get("location"),
             "salary": result.get("salary"),
+            "pay_range": result.get("pay_range"),
+            "application_deadline": result.get("application_deadline"),
             "remote": result.get("remote"),
             "url": source_url or result.get("url"),
             "description": result.get("description"),
@@ -928,6 +930,300 @@ Output the JSON now:"""
             "keywords": result.get("keywords", []),
             "credentials": result.get("credentials", []),
         }
+
+    # ---- Cover letter generation + revision ------------------------------
+
+    async def generate_cover_letter(
+        self,
+        job_description: Optional[str] = None,
+        resume_content: Optional[str] = None,
+        example_cover_letters: Optional[List[Dict]] = None,
+        target_role: Optional[str] = None,
+        company: Optional[str] = None,
+        position: Optional[str] = None,
+        model_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate a cover letter for a specific job, referencing the resume."""
+        agent_prompt = self._load_agent_prompt("cover-letter-generator")
+
+        examples_section = ""
+        if example_cover_letters:
+            examples_section = (
+                "\n\nEXAMPLE COVER LETTERS (voice/tone reference only):\n"
+            )
+            MAX_EXAMPLES = 2
+            MAX_TOTAL = 12000
+            selected = example_cover_letters[-MAX_EXAMPLES:]
+            total = 0
+            for idx, ex in enumerate(selected):
+                name = ex.get("name", f"Example {idx + 1}")
+                content = ex.get("content", "")
+                if content and content.startswith("data:"):
+                    content = extract_text_from_file(content, name)
+                remaining = MAX_TOTAL - total
+                if remaining <= 0:
+                    break
+                truncated = content[:min(6000, remaining)]
+                total += len(truncated)
+                examples_section += f"\n--- Example {idx + 1}: {name} ---\n{truncated}\n"
+
+        resume_section = ""
+        if resume_content:
+            if resume_content.startswith("data:"):
+                resume_content = extract_text_from_file(resume_content, "resume.docx")
+            resume_section = f"\nCANDIDATE'S RESUME (use these facts; do not fabricate):\n{resume_content[:16000]}\n"
+
+        job_section = ""
+        if job_description:
+            job_section = f"JOB DESCRIPTION:\n{job_description[:16000]}\n"
+        elif company or position:
+            job_section = f"TARGET ROLE: {position or 'the role'} at {company or 'the company'}\n"
+
+        prompt = f"""{agent_prompt}
+
+Generate a cover letter for the candidate below.
+
+TARGET ROLE: {target_role or position or "Not specified"}
+COMPANY: {company or "Not specified"}
+
+{job_section}
+
+{resume_section}
+
+{examples_section}
+
+Output format: Plain text cover letter only. No JSON, no markdown. Standard business letter format."""
+
+        try:
+            start = time.monotonic()
+            ollama_result = await self.ollama.generate(
+                prompt, temperature=0.7, model=model_override or self.ollama.generation_model
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+            content = ollama_result.get("content", "").strip()
+            if not content:
+                raise Exception("Empty response from Ollama")
+            return {
+                "content": content,
+                "model_used": ollama_result.get("model", self.ollama.generation_model),
+                "duration_ms": duration_ms,
+            }
+        except Exception as e:
+            logger.info(f"[CoverLetter/generate] Error: {e}")
+            return {"error": str(e), "content": f"Error generating cover letter: {str(e)}"}
+
+    async def revise_cover_letter(
+        self,
+        current_content: str,
+        feedback: str,
+        job_description: Optional[str] = None,
+        resume_content: Optional[str] = None,
+        target_role: Optional[str] = None,
+        model_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Revise an existing cover letter based on user feedback."""
+        agent_prompt = self._load_agent_prompt("cover-letter-generator")
+
+        resume_section = ""
+        if resume_content:
+            if resume_content.startswith("data:"):
+                resume_content = extract_text_from_file(resume_content, "resume.docx")
+            resume_section = f"\nCANDIDATE'S RESUME (facts; do not fabricate beyond these):\n{resume_content[:16000]}\n"
+
+        job_section = f"JOB DESCRIPTION:\n{job_description[:16000]}\n" if job_description else ""
+
+        prompt = f"""{agent_prompt}
+
+You are REVISING an existing cover letter based on the user's feedback.
+
+TARGET ROLE: {target_role or "Not specified"}
+
+CURRENT COVER LETTER:
+---
+{current_content}
+---
+
+USER FEEDBACK (apply these changes):
+---
+{feedback}
+---
+
+{resume_section}
+
+{job_section}
+
+CRITICAL INSTRUCTIONS:
+1. Start from the CURRENT COVER LETTER and make the specific changes requested
+2. Preserve content the user did NOT ask to change
+3. Do not fabricate experience not in the resume
+4. Output the COMPLETE revised cover letter (not just the changed parts)
+
+Output format: Plain text cover letter only. No JSON, no markdown."""
+
+        try:
+            ollama_result = await self.ollama.generate(
+                prompt, temperature=0.7, model=model_override or self.ollama.generation_model
+            )
+            content = ollama_result.get("content", "").strip()
+            if not content:
+                raise Exception("Empty response from Ollama")
+            return {
+                "content": content,
+                "model_used": ollama_result.get("model", self.ollama.generation_model),
+            }
+        except Exception as e:
+            logger.info(f"[CoverLetter/revise] Error: {e}")
+            return {"error": str(e), "content": f"Error revising cover letter: {str(e)}"}
+
+    # ---- Scoring agents: ATS + industry panel ----------------------------
+
+    async def score_ats(
+        self,
+        artifact_type: str,
+        artifact_content: str,
+        job_description: str,
+        model_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """ATS screening score for a resume or cover letter.
+
+        Returns the structured scores the ArtifactScore table expects:
+        {overall, parseability, keyword_match, search_relevance},
+        plus issues (list) and recommendations (list).
+        """
+        agent_prompt = self._load_agent_prompt("ats-expert")
+        kind_label = "cover letter" if artifact_type == "cover_letter" else "resume"
+
+        prompt = f"""{agent_prompt}
+
+Evaluate this {kind_label} against the job description for ATS compatibility.
+
+{kind_label.upper()}:
+{artifact_content[:16000]}
+
+JOB DESCRIPTION:
+{job_description[:16000]}
+
+Respond with ONLY a JSON object in this exact format:
+{{
+    "scores": {{
+        "overall": 7.5,
+        "parseability": 8,
+        "keyword_match": 7,
+        "search_relevance": 8
+    }},
+    "issues": ["issue1", "issue2"],
+    "recommendations": ["rec1", "rec2"],
+    "keywords_found": ["kw1"],
+    "keywords_missing": ["kw1"]
+}}
+
+Scores are 0-10 (one decimal allowed). Return ONLY the JSON."""
+
+        try:
+            response = await self.ollama.generate(
+                prompt, temperature=0.3, model=model_override or self.ollama.model
+            )
+            text = response.get("content", "").strip()
+            parsed = _extract_json(text)
+            if parsed is None:
+                raise json.JSONDecodeError("no JSON", text, 0)
+            return {
+                "scores": parsed.get("scores", {}),
+                "issues": parsed.get("issues", []),
+                "recommendations": parsed.get("recommendations", []),
+                "keywords_found": parsed.get("keywords_found", []),
+                "keywords_missing": parsed.get("keywords_missing", []),
+                "model_used": response.get("model", self.ollama.model),
+            }
+        except Exception as e:
+            logger.info(f"[ATS/score] Error: {e}")
+            return {
+                "scores": {},
+                "issues": [f"Could not parse agent response: {e}"],
+                "recommendations": [],
+                "model_used": self.ollama.model,
+            }
+
+    async def score_industry_panel(
+        self,
+        artifact_type: str,
+        artifact_content: str,
+        job_description: str,
+        target_role: Optional[str] = None,
+        model_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Industry-panel review score (4 personas, single LLM call).
+
+        Returns the structured scores the ArtifactScore table expects:
+        {overall, engineering, product, domain, recruiter, composite},
+        plus strengths (list), gaps (list), recommendation (str).
+        """
+        agent_prompt = self._load_agent_prompt("industry-panel")
+        kind_label = "cover letter" if artifact_type == "cover_letter" else "resume"
+
+        prompt = f"""{agent_prompt}
+
+Review this {kind_label} against the job description. Target role: {target_role or "Not specified"}.
+
+{kind_label.upper()}:
+{artifact_content[:16000]}
+
+JOB DESCRIPTION:
+{job_description[:16000]}
+
+Return ONLY a JSON object with this exact shape (no markdown, no explanation):
+{{
+    "personas": {{
+        "engineering": {{"score": 85, "rationale": "..."}},
+        "product": {{"score": 80, "rationale": "..."}},
+        "domain": {{"score": 90, "rationale": "..."}},
+        "recruiter": {{"score": 75, "rationale": "..."}}
+    }},
+    "composite": 82,
+    "strengths": ["...", "..."],
+    "gaps": ["...", "..."],
+    "recommendation": "yes"
+}}
+
+Scores 0-100. composite is the weighted average. recommendation ∈
+["strong yes", "yes", "maybe", "no", "strong no"]. Return ONLY the JSON."""
+
+        try:
+            response = await self.ollama.generate(
+                prompt, temperature=0.4, model=model_override or self.ollama.model
+            )
+            text = response.get("content", "").strip()
+            parsed = _extract_json(text)
+            if parsed is None:
+                raise json.JSONDecodeError("no JSON", text, 0)
+            personas = parsed.get("personas", {})
+            composite = parsed.get("composite")
+            if composite is None and personas:
+                vals = [p.get("score", 0) for p in personas.values() if isinstance(p, dict)]
+                composite = round(sum(vals) / len(vals)) if vals else 0
+            return {
+                "scores": {
+                    "overall": composite or 0,
+                    "engineering": personas.get("engineering", {}).get("score", 0) if isinstance(personas.get("engineering"), dict) else 0,
+                    "product": personas.get("product", {}).get("score", 0) if isinstance(personas.get("product"), dict) else 0,
+                    "domain": personas.get("domain", {}).get("score", 0) if isinstance(personas.get("domain"), dict) else 0,
+                    "recruiter": personas.get("recruiter", {}).get("score", 0) if isinstance(personas.get("recruiter"), dict) else 0,
+                    "composite": composite or 0,
+                },
+                "issues": parsed.get("gaps", []),
+                "recommendations": [parsed.get("recommendation", "")],
+                "strengths": parsed.get("strengths", []),
+                "recommendation": parsed.get("recommendation", ""),
+                "model_used": response.get("model", self.ollama.model),
+            }
+        except Exception as e:
+            logger.info(f"[IndustryPanel/score] Error: {e}")
+            return {
+                "scores": {},
+                "issues": [f"Could not parse agent response: {e}"],
+                "recommendations": [],
+                "model_used": self.ollama.model,
+            }
 
 
 # ---- Structured-resume helpers ------------------------------------------

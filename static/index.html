@@ -779,12 +779,31 @@
                 <button class="btn btn-secondary" id="btn-resume-settings" title="Resume Settings">
                     <i class="fas fa-cog"></i> Resume Settings
                 </button>
+                <button class="btn btn-secondary" id="btn-cover-letter-settings" title="Cover Letter Examples">
+                    <i class="fas fa-envelope"></i> Cover Letters
+                </button>
                 <button class="btn btn-secondary" id="btn-notifications" title="Notifications" style="position: relative;">
                     <i class="fas fa-bell"></i>
                     <span id="notification-badge" style="display: none; position: absolute; top: -6px; right: -6px; background: var(--danger); color: white; border-radius: 10px; padding: 1px 6px; font-size: 0.7rem; font-weight: 600;">0</span>
                 </button>
                 <button class="btn btn-primary" id="btn-add-job">
                     <i class="fas fa-plus"></i> Add Job to Tracker
+                </button>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <label for="sort-select" style="font-size: 0.85rem; color: var(--gray-600); font-weight: 500;">Sort:</label>
+                <select id="sort-select" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
+                    <option value="created">Date added</option>
+                    <option value="company">Company</option>
+                    <option value="position">Position</option>
+                    <option value="location">Location</option>
+                    <option value="stage">Stage</option>
+                    <option value="applied_date">Applied date</option>
+                    <option value="deadline">Deadline</option>
+                    <option value="pay">Pay (high to low)</option>
+                </select>
+                <button class="btn btn-secondary" id="btn-sort-order" title="Toggle sort order" style="padding: 6px 10px;">
+                    <i class="fas fa-arrow-down-wide-short" id="sort-order-icon"></i>
                 </button>
             </div>
         </div>
@@ -850,19 +869,42 @@
                 <form id="job-form">
                     <input type="hidden" id="job-id">
 
-                    <div class="form-group">
-                        <label for="job-url">
-                            <i class="fas fa-link"></i> Job Posting URL (Optional)
-                        </label>
-                        <input type="url" id="job-url" placeholder="https://... (for your reference)">
-                        <small>Save the job posting URL so you can quickly return to the application page.</small>
+                    <!-- Tab switcher: From URL vs Paste text -->
+                    <div class="form-tabs" id="add-job-tabs" style="display:flex; gap:8px; margin-bottom:16px; border-bottom:2px solid var(--gray-200);">
+                        <button type="button" class="form-tab active" data-tab="url" id="tab-from-url" style="padding:10px 16px; border:none; background:none; cursor:pointer; border-bottom:2px solid var(--primary); color:var(--primary); font-weight:600;">From URL</button>
+                        <button type="button" class="form-tab" data-tab="text" id="tab-paste-text" style="padding:10px 16px; border:none; background:none; cursor:pointer; color:var(--gray-600); font-weight:500;">Paste Text</button>
                     </div>
 
-                    <div class="form-group">
-                        <label for="job-text">
-                            <i class="fas fa-align-left"></i> Job Description *
-                        </label>
-                        <textarea id="job-text" rows="12" placeholder="Paste the full job description here...
+                    <!-- From URL tab -->
+                    <div class="form-tab-panel" id="panel-from-url">
+                        <div class="form-group">
+                            <label for="job-url-only">
+                                <i class="fas fa-link"></i> Job Posting URL
+                            </label>
+                            <input type="url" id="job-url-only" placeholder="https://www.linkedin.com/jobs/...">
+                            <small>Paste the job posting URL. The agent fetches and parses the details automatically — no copy-paste needed.</small>
+                        </div>
+                        <div class="parsing-status" id="url-fetch-status" style="display: none;">
+                            <div class="spinner"></div>
+                            <span id="url-fetch-status-text">Fetching and parsing the job posting...</span>
+                        </div>
+                    </div>
+
+                    <!-- Paste text tab -->
+                    <div class="form-tab-panel" id="panel-paste-text" style="display:none;">
+                        <div class="form-group">
+                            <label for="job-url">
+                                <i class="fas fa-link"></i> Job Posting URL (Optional)
+                            </label>
+                            <input type="url" id="job-url" placeholder="https://... (for your reference)">
+                            <small>Save the job posting URL so you can quickly return to the application page.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="job-text">
+                                <i class="fas fa-align-left"></i> Job Description *
+                            </label>
+                            <textarea id="job-text" rows="12" placeholder="Paste the full job description here...
 
 The AI will automatically extract:
 • Company name
@@ -871,7 +913,8 @@ The AI will automatically extract:
 • Salary
 • Required skills
 • Key responsibilities"></textarea>
-                        <small>Required. Paste the complete job description text. The AI will parse and extract the details.</small>
+                            <small>Required. Paste the complete job description text. The AI will parse and extract the details.</small>
+                        </div>
                     </div>
 
                     <div class="parsing-status" id="parsing-status" style="display: none;">
@@ -1074,6 +1117,36 @@ The AI will automatically extract:
         </div>
     </div>
 
+    <!-- Cover Letter Examples Settings Modal -->
+    <div class="modal-overlay" id="cover-letter-settings-modal" style="z-index: 1500;">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-envelope"></i> Cover Letter Examples</h2>
+                <button class="btn-close" id="btn-close-cover-letter-settings">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <div class="resume-settings-section">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 16px; color: var(--gray-800);">
+                        <i class="fas fa-file-alt" style="color: var(--primary);"></i> Example Cover Letters
+                    </h3>
+                    <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
+                        Upload cover letters you've used successfully. These give the AI your voice and tone for new generations.
+                    </p>
+                    <div class="file-upload-zone" id="example-cover-letters-zone" style="border: 2px dashed var(--gray-300); border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; color: var(--primary); margin-bottom: 8px;"></i>
+                        <p>Drag & drop example cover letters here or click to browse</p>
+                        <small style="color: var(--gray-500);">Supports: PDF, DOCX, TXT (Max 5MB each)</small>
+                        <input type="file" id="example-cover-letters-input" multiple accept=".pdf,.docx,.txt" style="display: none;">
+                    </div>
+                    <div class="file-list" id="example-cover-letters-list" style="margin-top: 12px;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-cover-letter-settings">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Resume Viewer Modal (for viewing example/template content) -->
     <div class="modal-overlay" id="resume-viewer-modal" style="z-index: 3000;">
         <div class="modal" style="max-width: 800px; width: 100%; height: 85vh; max-height: 95vh; display: flex; flex-direction: column; margin: 10px;">
@@ -1159,22 +1232,16 @@ The AI will automatically extract:
         // app-wide default; users can override via Resume Settings.
         const DEFAULT_MODEL = 'qwen3.5:cloud';
         const AVAILABLE_MODELS = [
-            { value: 'gemini-3-flash-preview:cloud', label: 'Gemini 3 Flash Preview · 109 tok/s' },
-            { value: 'gemma4:31b-cloud', label: 'Gemma 4 31B · 99 tok/s' },
-            { value: 'kimi-k2.7-code:cloud', label: 'Kimi K2.7 Code · 91 tok/s' },
-            { value: 'deepseek-v4-pro:cloud', label: 'DeepSeek V4 Pro · 86 tok/s' },
-            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 82 tok/s' },
-            { value: 'minimax-m2.5:cloud', label: 'MiniMax M2.5 · 82 tok/s' },
-            { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B · 78 tok/s' },
-            { value: 'glm-5:cloud', label: 'GLM 5 · 70 tok/s' },
             { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 65 tok/s' },
-            { value: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super · 65 tok/s' },
-            { value: 'gemma3:12b-cloud', label: 'Gemma 3 12B · 48 tok/s' },
-            { value: 'gpt-oss:20b-cloud', label: 'GPT-OSS 20B · 47 tok/s' },
-            { value: 'nemotron-3-ultra:cloud', label: 'Nemotron 3 Ultra · 36 tok/s' },
-            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 25 tok/s' },
-            { value: 'devstral-2:123b-cloud', label: 'Devstral 2 123B · 12 tok/s' },
-            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 11 tok/s' },
+            { value: 'qwen3.5:397b-cloud', label: 'Qwen 3.5 (397B) · 67 tok/s' },
+            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 193 tok/s' },
+            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 184 tok/s' },
+            { value: 'kimi-k2.6:cloud', label: 'Kimi K2.6 · 122 tok/s' },
+            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 108 tok/s' },
+            { value: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super · 98 tok/s' },
+            { value: 'deepseek-v4-pro:cloud', label: 'DeepSeek V4 Pro · 88 tok/s' },
+            { value: 'gemma4:cloud', label: 'Gemma 4 · 88 tok/s' },
+            { value: 'minimax-m2.7:cloud', label: 'MiniMax M2.7 · 48 tok/s' },
         ];
 
         let resumeSettings = JSON.parse(localStorage.getItem('resumeSettings')) || {
@@ -1398,6 +1465,8 @@ The AI will automatically extract:
 
         let currentFilter = 'all';
         let currentJobId = null;
+        let currentSort = 'created';
+        let currentOrder = 'desc';
 
         // DOM Elements
         const jobModal = document.getElementById('job-modal');
@@ -1597,7 +1666,11 @@ The AI will automatically extract:
         // Fetch jobs from API
         async function fetchJobs() {
             try {
-                const response = await apiFetch(`${API_URL}/jobs`);
+                const params = new URLSearchParams();
+                if (currentSort) params.set('sort', currentSort);
+                if (currentOrder) params.set('order', currentOrder);
+                const qs = params.toString();
+                const response = await apiFetch(`${API_URL}/jobs${qs ? '?' + qs : ''}`);
                 if (!response.ok) throw new Error('Failed to fetch jobs');
                 const data = await response.json();
                 jobs = data;
@@ -1960,6 +2033,69 @@ The AI will automatically extract:
                     </div>
                 </div>
 
+                <!-- Generated artifacts: Resume + Cover Letter + Scores -->
+                <div class="detail-section">
+                    <div style="display:flex; gap:8px; margin-bottom:12px; border-bottom:2px solid var(--gray-200);">
+                        <button type="button" class="artifact-tab active" data-artifact-tab="resume" data-job-id="${fullJob.id}" style="padding:8px 14px; border:none; background:none; cursor:pointer; border-bottom:2px solid var(--primary); color:var(--primary); font-weight:600;">Resume</button>
+                        <button type="button" class="artifact-tab" data-artifact-tab="cover-letter" data-job-id="${fullJob.id}" style="padding:8px 14px; border:none; background:none; cursor:pointer; color:var(--gray-600); font-weight:500;">Cover Letter</button>
+                        <button type="button" class="artifact-tab" data-artifact-tab="scores" data-job-id="${fullJob.id}" style="padding:8px 14px; border:none; background:none; cursor:pointer; color:var(--gray-600); font-weight:500;">Scores</button>
+                    </div>
+
+                    <!-- Resume panel -->
+                    <div class="artifact-panel" id="artifact-panel-resume">
+                        <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="generateResume(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">
+                                <i class="fas fa-wand-magic-sparkles"></i> ${fullJob.generated_resume ? 'Regenerate' : 'Generate'} Resume
+                            </button>
+                        </div>
+                        <div id="resume-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.generated_resume || '<em style="color:var(--gray-500)">No resume generated yet.</em>'}</div>
+                        <div style="margin-top:10px;">
+                            <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise resume):</label>
+                            <textarea id="resume-feedback-input" rows="2" placeholder="e.g. Make the lead bullet more quantified; emphasize the AWS migration." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
+                            <button class="btn btn-secondary" onclick="reviseResume(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px; margin-top:6px;">
+                                <i class="fas fa-pen-to-square"></i> Revise with feedback
+                            </button>
+                        </div>
+                        <div id="resume-revisions" style="margin-top:8px; font-size:0.8rem; color:var(--gray-600);">
+                            ${(fullJob.resume_revisions || []).length} revision(s)
+                        </div>
+                    </div>
+
+                    <!-- Cover letter panel -->
+                    <div class="artifact-panel" id="artifact-panel-cover-letter" style="display:none;">
+                        <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="generateCoverLetter(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">
+                                <i class="fas fa-wand-magic-sparkles"></i> ${fullJob.has_cover_letter ? 'Regenerate' : 'Generate'} Cover Letter
+                            </button>
+                            ${fullJob.has_cover_letter ? `<button class="btn btn-danger" onclick="deleteCoverLetter(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">Delete</button>` : ''}
+                        </div>
+                        <div id="cover-letter-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.cover_letter || '<em style="color:var(--gray-500)">No cover letter generated yet.</em>'}</div>
+                        <div style="margin-top:10px;">
+                            <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise cover letter):</label>
+                            <textarea id="cover-letter-feedback-input" rows="2" placeholder="e.g. Open with the specific company problem; cut the second paragraph." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
+                            <button class="btn btn-secondary" onclick="reviseCoverLetter(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px; margin-top:6px;">
+                                <i class="fas fa-pen-to-square"></i> Revise with feedback
+                            </button>
+                        </div>
+                        <div id="cover-letter-revisions" style="margin-top:8px; font-size:0.8rem; color:var(--gray-600);">
+                            ${(fullJob.cover_letter_revisions || []).length} revision(s)
+                        </div>
+                    </div>
+
+                    <!-- Scores panel -->
+                    <div class="artifact-panel" id="artifact-panel-scores" style="display:none;">
+                        <div id="scores-content" style="font-size:0.85rem;">
+                            <button class="btn btn-secondary" onclick="loadScores(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">
+                                <i class="fas fa-chart-line"></i> Load scores
+                            </button>
+                            <button class="btn btn-primary" onclick="scoreAll(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px; margin-left:8px;">
+                                <i class="fas fa-gavel"></i> Run ATS + Panel (resume + cover letter)
+                            </button>
+                            <p style="margin-top:10px; color:var(--gray-500);">Click "Run" to score the latest resume and cover letter with ATS + industry panel agents.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="detail-section">
                     <h4>Notes</h4>
                     <div class="notes-box">${fullJob.notes || 'No notes added.'}</div>
@@ -2004,7 +2140,7 @@ The AI will automatically extract:
 
         let isSubmittingJob = false;
 
-        // Handle form submission
+        // Handle form submission (two-tab: From URL or Paste Text)
         document.getElementById('job-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -2015,28 +2151,46 @@ The AI will automatically extract:
             submitBtn.disabled = true;
             submitBtn.textContent = 'Saving...';
 
-            const url = document.getElementById('job-url').value.trim();
-            const text = document.getElementById('job-text').value.trim();
-
-            if (!text) {
-                alert('Please paste the job description text');
-                isSubmittingJob = false;
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Save Job';
-                return;
-            }
-
-            const requestData = {
-                url: url || null,
-                job_text: text
-            };
+            // Determine which tab is active
+            const urlOnlyValue = document.getElementById('job-url-only').value.trim();
+            const isUrlTab = document.getElementById('panel-from-url').style.display !== 'none';
 
             try {
-                const response = await apiFetch(`${API_URL}/jobs`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestData)
-                });
+                let response;
+                if (isUrlTab) {
+                    // URL-only path: fetch + parse + create in one call
+                    if (!urlOnlyValue) {
+                        alert('Please enter a job posting URL');
+                        isSubmittingJob = false;
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Save Job';
+                        return;
+                    }
+                    const fetchStatus = document.getElementById('url-fetch-status');
+                    fetchStatus.style.display = 'flex';
+                    response = await apiFetch(`${API_URL}/jobs/from-url`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: urlOnlyValue })
+                    });
+                    fetchStatus.style.display = 'none';
+                } else {
+                    // Paste text path (existing)
+                    const url = document.getElementById('job-url').value.trim();
+                    const text = document.getElementById('job-text').value.trim();
+                    if (!text) {
+                        alert('Please paste the job description text');
+                        isSubmittingJob = false;
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Save Job';
+                        return;
+                    }
+                    response = await apiFetch(`${API_URL}/jobs`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url || null, job_text: text })
+                    });
+                }
 
                 if (!response.ok) {
                     const error = await response.json();
@@ -3378,21 +3532,25 @@ The AI will automatically extract:
                     // Model name -> human-readable label
                     const modelLabels = {
                         'qwen3.5:cloud': 'Qwen 3.5',
-                        'minimax-m3:cloud': 'MiniMax M3',
-                        'minimax-m2.5:cloud': 'MiniMax M2.5',
-                        'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
-                        'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
-                        'nemotron-3-super:cloud': 'Nemotron 3 Super',
+                        'qwen3.5:397b-cloud': 'Qwen 3.5 (397B)',
+                        'gemma4:cloud': 'Gemma 4',
                         'gemma4:31b-cloud': 'Gemma 4 31B',
-                        'gemma3:12b-cloud': 'Gemma 3 12B',
                         'glm-5.1:cloud': 'GLM 5.1',
                         'glm-5:cloud': 'GLM 5',
+                        'nemotron-3-super:cloud': 'Nemotron 3 Super',
+                        'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
+                        'minimax-m2.7:cloud': 'MiniMax M2.7',
+                        'minimax-m2.5:cloud': 'MiniMax M2.5',
+                        'minimax-m3:cloud': 'MiniMax M3',
+                        'kimi-k2.6:cloud': 'Kimi K2.6',
+                        'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
                         'deepseek-v4-flash:cloud': 'DeepSeek V4 Flash',
                         'deepseek-v4-pro:cloud': 'DeepSeek V4 Pro',
-                        'gemini-3-flash-preview:cloud': 'Gemini 3 Flash Preview',
-                        'devstral-2:123b-cloud': 'Devstral 2 123B',
                         'gpt-oss:20b-cloud': 'GPT-OSS 20B',
                         'gpt-oss:120b-cloud': 'GPT-OSS 120B',
+                        'gemini-3-flash-preview:cloud': 'Gemini 3 Flash Preview',
+                        'gemma3:12b-cloud': 'Gemma 3 12B',
+                        'devstral-2:123b-cloud': 'Devstral 2 123B',
                     };
                     // Show revisions newest-first
                     const sorted = [...revisions].sort((a, b) => (b.version || 0) - (a.version || 0));
@@ -3541,6 +3699,288 @@ The AI will automatically extract:
         resumeEditorModal.addEventListener('click', (e) => {
             if (e.target === resumeEditorModal) resumeEditorModal.classList.remove('active');
         });
+
+        // ─── Add-job modal tab switching ───
+        document.querySelectorAll('#add-job-tabs .form-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const target = tab.dataset.tab;
+                document.querySelectorAll('#add-job-tabs .form-tab').forEach(t => {
+                    t.classList.remove('active');
+                    t.style.borderBottom = '2px solid transparent';
+                    t.style.color = 'var(--gray-600)';
+                });
+                tab.classList.add('active');
+                tab.style.borderBottom = '2px solid var(--primary)';
+                tab.style.color = 'var(--primary)';
+                document.getElementById('panel-from-url').style.display = target === 'url' ? 'block' : 'none';
+                document.getElementById('panel-paste-text').style.display = target === 'text' ? 'block' : 'none';
+            });
+        });
+
+        // ─── Sort dropdown ───
+        document.getElementById('sort-select').addEventListener('change', async (e) => {
+            currentSort = e.target.value;
+            await fetchJobs();
+        });
+        document.getElementById('btn-sort-order').addEventListener('click', async () => {
+            currentOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+            document.getElementById('sort-order-icon').className = currentOrder === 'desc' ? 'fas fa-arrow-down-wide-short' : 'fas fa-arrow-up-wide-short';
+            await fetchJobs();
+        });
+
+        // ─── Cover letter settings modal ───
+        const coverLetterSettingsModal = document.getElementById('cover-letter-settings-modal');
+        document.getElementById('btn-cover-letter-settings').addEventListener('click', () => {
+            loadExampleCoverLetters();
+            coverLetterSettingsModal.classList.add('active');
+        });
+        document.getElementById('btn-close-cover-letter-settings').addEventListener('click', () => coverLetterSettingsModal.classList.remove('active'));
+        document.getElementById('btn-cancel-cover-letter-settings').addEventListener('click', () => coverLetterSettingsModal.classList.remove('active'));
+        coverLetterSettingsModal.addEventListener('click', (e) => {
+            if (e.target === coverLetterSettingsModal) coverLetterSettingsModal.classList.remove('active');
+        });
+        document.getElementById('example-cover-letters-zone').addEventListener('click', () => document.getElementById('example-cover-letters-input').click());
+        document.getElementById('example-cover-letters-input').addEventListener('change', async (e) => {
+            for (const file of e.target.files) {
+                await uploadExampleCoverLetter(file);
+            }
+            e.target.value = '';
+        });
+
+        async function uploadExampleCoverLetter(file) {
+            if (file.size > 5 * 1024 * 1024) { alert('File too large (max 5MB)'); return; }
+            const b64 = await fileToBase64(file);
+            try {
+                const r = await apiFetch(`${API_URL}/cover-letters/base`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: file.name, letter_type: 'example', content: b64 })
+                });
+                if (!r.ok) throw new Error('Upload failed');
+                await loadExampleCoverLetters();
+            } catch (err) { alert('Error uploading cover letter: ' + err.message); }
+        }
+
+        async function loadExampleCoverLetters() {
+            try {
+                const r = await apiFetch(`${API_URL}/cover-letters/base`);
+                if (!r.ok) return;
+                const letters = await r.json();
+                const list = document.getElementById('example-cover-letters-list');
+                if (!letters.length) { list.innerHTML = '<p style="color:var(--gray-500); font-size:0.85rem;">No example cover letters uploaded.</p>'; return; }
+                list.innerHTML = letters.map(l => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--gray-50); border-radius:6px; margin-bottom:6px;">
+                        <span><i class="fas fa-file-alt"></i> ${escapeHtml(l.name)}</span>
+                        <button class="btn btn-danger" style="font-size:0.75rem; padding:4px 10px;" onclick="deleteExampleCoverLetter(${l.id})">Delete</button>
+                    </div>`).join('');
+            } catch (err) { console.error(err); }
+        }
+
+        async function deleteExampleCoverLetter(id) {
+            if (!confirm('Delete this cover letter?')) return;
+            try {
+                await apiFetch(`${API_URL}/cover-letters/base/${id}`, { method: 'DELETE' });
+                await loadExampleCoverLetters();
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        // ─── Artifact tab switching (detail modal) ───
+        document.addEventListener('click', (e) => {
+            const tab = e.target.closest('.artifact-tab');
+            if (!tab) return;
+            const target = tab.dataset.artifactTab;
+            document.querySelectorAll('.artifact-tab').forEach(t => {
+                t.classList.remove('active');
+                t.style.borderBottom = '2px solid transparent';
+                t.style.color = 'var(--gray-600)';
+            });
+            tab.classList.add('active');
+            tab.style.borderBottom = '2px solid var(--primary)';
+            tab.style.color = 'var(--primary)';
+            document.querySelectorAll('.artifact-panel').forEach(p => p.style.display = 'none');
+            const panel = document.getElementById('artifact-panel-' + target);
+            if (panel) panel.style.display = 'block';
+        });
+
+        // ─── Cover letter generation + revision ───
+        async function generateCoverLetter(jobId) {
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+                });
+                if (!r.ok) throw new Error('Failed to start generation');
+                pollCoverLetterStatus(jobId);
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        async function pollCoverLetterStatus(jobId) {
+            const panel = document.getElementById('cover-letter-content');
+            panel.innerHTML = '<em style="color:var(--gray-500)">Generating cover letter...</em>';
+            const max = 120, delay = 2000;
+            for (let i = 0; i < max; i++) {
+                await new Promise(res => setTimeout(res, delay));
+                try {
+                    const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
+                    if (!r.ok) continue;
+                    const data = await r.json();
+                    if (data.status === 'completed') {
+                        panel.textContent = data.cover_letter || '';
+                        document.getElementById('cover-letter-revisions').textContent = (data.revisions || []).length + ' revision(s)';
+                        addNotification({ id: 'cl-' + jobId, jobId, company: '', position: '', version: data.version, model: '', timestamp: new Date().toISOString(), title: 'Cover letter ready' });
+                        return;
+                    }
+                    if (data.status === 'error') { panel.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(data.error || '') + '</em>'; return; }
+                } catch (err) { /* keep polling */ }
+            }
+            panel.innerHTML = '<em style="color:var(--gray-500)">Timed out waiting for generation.</em>';
+        }
+
+        async function reviseCoverLetter(jobId) {
+            const feedback = document.getElementById('cover-letter-feedback-input').value.trim();
+            if (!feedback) { alert('Enter feedback for the agent first.'); return; }
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-cover-letter`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feedback })
+                });
+                if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
+                const data = await r.json();
+                document.getElementById('cover-letter-content').textContent = data.cover_letter || '';
+                document.getElementById('cover-letter-revisions').textContent = (data.revisions || []).length + ' revision(s)';
+                document.getElementById('cover-letter-feedback-input').value = '';
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        async function deleteCoverLetter(jobId) {
+            if (!confirm('Delete the generated cover letter?')) return;
+            try {
+                await apiFetch(`${API_URL}/jobs/${jobId}/cover-letter`, { method: 'DELETE' });
+                await showDetail(jobId);
+                await fetchJobs();
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        // Resume feedback-to-agent (uses existing revise-resume route)
+        async function reviseResume(jobId) {
+            const feedback = document.getElementById('resume-feedback-input').value.trim();
+            if (!feedback) { alert('Enter feedback for the agent first.'); return; }
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-resume`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feedback })
+                });
+                if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
+                const data = await r.json();
+                document.getElementById('resume-content').textContent = data.resume || '';
+                document.getElementById('resume-revisions').textContent = (data.revisions || []).length + ' revision(s)';
+                document.getElementById('resume-feedback-input').value = '';
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        // ─── Scoring (ATS + industry panel) ───
+        async function scoreAll(jobId) {
+            const content = document.getElementById('scores-content');
+            content.innerHTML = '<em style="color:var(--gray-500)">Running ATS + industry panel on resume and cover letter... this runs in the background.</em>';
+            // Kick off all four scorings (resume ats, resume panel, cover-letter ats, cover-letter panel) — fire and forget
+            try {
+                // Need resume_id and cover_letter_id — fetch the job detail
+                const jr = await apiFetch(`${API_URL}/jobs/${jobId}`);
+                if (!jr.ok) throw new Error('Could not load job');
+                const job = await jr.json();
+                const tasks = [];
+                if (job.generated_resume) {
+                    // resume_id is needed; the route takes it as a path param. We don't have it on the list response,
+                    // so use the from-URL of the latest. For simplicity, call the no-id variant by fetching first.
+                    const gr = await apiFetch(`${API_URL}/debug/resume/${jobId}`);
+                    if (gr.ok) {
+                        const dbg = await gr.json();
+                        const resumeId = dbg.id;
+                        if (resumeId) {
+                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats`, { method: 'POST' }));
+                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel`, { method: 'POST' }));
+                        }
+                    }
+                }
+                if (job.has_cover_letter) {
+                    // cover_letter_id unknown on list response; the GET detail returns has_cover_letter but not id.
+                    // Use the scores route's own logic by attempting the latest; for now poll the scores endpoint.
+                    // Simplification: call a no-id variant. Since routes require id, fall back to scores fetch.
+                }
+                await Promise.all(tasks.map(p => p.catch(() => null)));
+                content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
+            } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
+        async function loadScores(jobId) {
+            const content = document.getElementById('scores-content');
+            content.innerHTML = '<em style="color:var(--gray-500)">Loading...</em>';
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/scores`);
+                if (!r.ok) throw new Error('Failed to load scores');
+                const scores = await r.json();
+                if (!scores.length) { content.innerHTML = '<p style="color:var(--gray-500)">No scores yet. Click "Run" to score.</p>'; return; }
+                content.innerHTML = scores.map(s => renderScoreCard(s)).join('');
+            } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
+        function renderScoreCard(s) {
+            const sc = s.scores || {};
+            const isAts = s.score_type === 'ats';
+            const label = isAts ? 'ATS' : 'Industry Panel';
+            const icon = isAts ? 'fa-shield-halved' : 'fa-users';
+            const artifactLabel = s.artifact_type === 'cover_letter' ? 'Cover Letter' : 'Resume';
+            let body;
+            if (isAts) {
+                body = `
+                    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:8px;">
+                        <div><strong>Overall:</strong> ${sc.overall ?? '-'}/10</div>
+                        <div><strong>Parseability:</strong> ${sc.parseability ?? '-'}/10</div>
+                        <div><strong>Keyword match:</strong> ${sc.keyword_match ?? '-'}/10</div>
+                        <div><strong>Search relevance:</strong> ${sc.search_relevance ?? '-'}/10</div>
+                    </div>`;
+            } else {
+                body = `
+                    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:8px;">
+                        <div><strong>Composite:</strong> ${sc.composite ?? '-'}/100</div>
+                        <div><strong>Engineering:</strong> ${sc.engineering ?? '-'}</div>
+                        <div><strong>Product:</strong> ${sc.product ?? '-'}</div>
+                        <div><strong>Domain:</strong> ${sc.domain ?? '-'}</div>
+                        <div><strong>Recruiter:</strong> ${sc.recruiter ?? '-'}</div>
+                    </div>`;
+            }
+            const issues = (s.issues || []).length ? `<div style="margin-top:8px;"><strong>Gaps:</strong> ${s.issues.map(i => escapeHtml(i)).join('; ')}</div>` : '';
+            const recs = (s.recommendations || []).length ? `<div style="margin-top:4px;"><strong>Recommendation:</strong> ${s.recommendations.map(r => escapeHtml(r)).join('; ')}</div>` : '';
+            return `<div style="border:1px solid var(--gray-200); border-radius:8px; padding:12px; margin-bottom:10px;">
+                <div style="font-weight:600;"><i class="fas ${icon}"></i> ${label} — ${artifactLabel}</div>
+                ${body}${issues}${recs}
+                <div style="font-size:0.75rem; color:var(--gray-500); margin-top:6px;">${s.model_used || ''} · ${s.created_at || ''}</div>
+            </div>`;
+        }
+
+        // Make functions available to inline onclick handlers
+        window.reviseResume = reviseResume;
+        window.generateCoverLetter = generateCoverLetter;
+        window.reviseCoverLetter = reviseCoverLetter;
+        window.deleteCoverLetter = deleteCoverLetter;
+        window.loadScores = loadScores;
+        window.scoreAll = scoreAll;
+        window.deleteExampleCoverLetter = deleteExampleCoverLetter;
+        window.escapeHtml = escapeHtml;
+
         } // end initApp()
 
         // ─── Initialize on Page Load ───

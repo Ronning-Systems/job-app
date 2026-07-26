@@ -2,7 +2,7 @@ import os
 import logging
 import secrets
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -37,6 +37,7 @@ class User(Base):
     # Relationships
     jobs = relationship("Job", back_populates="user")
     base_resumes = relationship("BaseResume", back_populates="user")
+    base_cover_letters = relationship("BaseCoverLetter", back_populates="user", cascade="all, delete-orphan")
 
 
 class Job(Base):
@@ -44,11 +45,21 @@ class Job(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     public_job_id = Column(String(32), unique=True, index=True, nullable=True)  # Globally unique short code
-    company = Column(String, nullable=False)
-    position = Column(String, nullable=False)
-    location = Column(String)
-    salary = Column(String)
-    remote = Column(String)  # Remote, Hybrid, On-site
+    company = Column(String, nullable=False, index=True)
+    position = Column(String, nullable=False, index=True)
+    location = Column(String, index=True)
+    salary = Column(String)  # Free-text salary string (kept for anything that can't be structured)
+    remote = Column(String, index=True)  # Remote, Hybrid, On-site
+
+    # Structured pay range (parsed from salary text where possible). Separate
+    # from the free-text `salary` column so jobs can be sorted by pay.
+    pay_range_min = Column(Integer, nullable=True)
+    pay_range_max = Column(Integer, nullable=True)
+    pay_currency = Column(String, default="USD")
+    pay_period = Column(String, nullable=True)  # 'annual' | 'hourly' | 'monthly'
+
+    # Application deadline parsed from the posting (sortable; no reminders in v1).
+    application_deadline = Column(DateTime, nullable=True, index=True)
 
     # Job description fields
     job_url = Column(String)
@@ -57,19 +68,20 @@ class Job(Base):
     requirements = Column(JSON)  # Must have and nice to have
     responsibilities = Column(JSON)
     keywords = Column(JSON)
-    required_credentials = Column(JSON)
+    required_credentials = Column(JSON)  # Also surfaced as a structured list
 
     # Source tracking
     source_type = Column(String)  # 'url' or 'text'
     source_url = Column(String)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     applications = relationship("JobApplication", back_populates="job", cascade="all, delete-orphan")
     resumes = relationship("GeneratedResume", back_populates="job", cascade="all, delete-orphan")
+    cover_letters = relationship("GeneratedCoverLetter", back_populates="job", cascade="all, delete-orphan")
     user = relationship("User", back_populates="jobs")
 
 
@@ -138,6 +150,70 @@ class GeneratedResume(Base):
 
     # Relationships
     job = relationship("Job", back_populates="resumes")
+
+
+class BaseCoverLetter(Base):
+    """Stored example cover letters (voice/tone reference for the generator).
+
+    Parallel in structure to BaseResume but simpler: cover letters have no
+    template/DOCX variant in v1 — only example letters used for tone.
+    """
+    __tablename__ = "base_cover_letters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)  # Filename or user-provided name
+    letter_type = Column(String, nullable=False)  # 'example' (only variant in v1)
+    content = Column(Text)  # The actual cover letter text (or extracted from DOCX)
+    source = Column(String, default="upload")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user = relationship("User", back_populates="base_cover_letters")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GeneratedCoverLetter(Base):
+    """Generated cover letter with revision history, linked to a job.
+
+    Mirrors GeneratedResume: one row per job, revisions is a versioned list
+    carrying the user feedback that produced each version.
+    """
+    __tablename__ = "generated_cover_letters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    current_content = Column(Text)  # Latest version (plain text)
+    revisions = Column(JSON, default=list)  # List of {version, content, feedback, model, timestamp}
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    job = relationship("Job", back_populates="cover_letters")
+
+
+class ArtifactScore(Base):
+    """Persisted scores from ATS + industry-panel agents.
+
+    One row per (artifact_type, artifact_id, score_type). artifact_id is a
+    soft FK to either generated_resumes.id or generated_cover_letters.id
+    (polymorphic via artifact_type; no DB-level FK constraint so an artifact
+    can be deleted without orphans blocking, the app filters by existence).
+    """
+    __tablename__ = "artifact_scores"
+    __table_args__ = (
+        Index("ix_artifact_scores_artifact", "artifact_type", "artifact_id", "score_type"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    artifact_type = Column(String, nullable=False)  # 'resume' | 'cover_letter'
+    artifact_id = Column(Integer, nullable=False)  # FK to generated_resumes or generated_cover_letters
+    score_type = Column(String, nullable=False)  # 'ats' | 'industry_panel'
+    scores = Column(JSON)  # ATS: {overall, parseability, keyword_match, search_relevance}; panel: {overall, engineering, product, domain, recruiter, composite}
+    issues = Column(JSON)  # List of issue strings
+    recommendations = Column(JSON)  # List of recommendation strings
+    model_used = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # Database setup - PostgreSQL for production, SQLite for local dev
@@ -253,6 +329,21 @@ def _run_migrations(eng):
                 conn.commit()
             except Exception as e:
                 logger.debug(f"Unique index on public_job_id may already exist: {e}")
+
+            # Structured pay range + application deadline (added 2026-07-25).
+            # These are nullable so existing rows backfill to NULL; new jobs
+            # populate them when the parser can extract structured pay/deadline.
+            for col, ddl in [
+                ("pay_range_min", "ALTER TABLE jobs ADD COLUMN pay_range_min INTEGER"),
+                ("pay_range_max", "ALTER TABLE jobs ADD COLUMN pay_range_max INTEGER"),
+                ("pay_currency", "ALTER TABLE jobs ADD COLUMN pay_currency VARCHAR DEFAULT 'USD'"),
+                ("pay_period", "ALTER TABLE jobs ADD COLUMN pay_period VARCHAR"),
+                ("application_deadline", "ALTER TABLE jobs ADD COLUMN application_deadline DATETIME"),
+            ]:
+                if col not in existing_cols:
+                    logger.info(f"Migrating: adding '{col}' column to jobs")
+                    conn.execute(text(ddl))
+                    conn.commit()
 
     # Check base_resumes table for missing columns (template fields)
     if 'base_resumes' in inspector.get_table_names():
