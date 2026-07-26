@@ -1536,6 +1536,7 @@ The AI will automatically extract:
                     authorizationParams: {
                         redirect_uri: AUTH0_REDIRECT_URI,
                         audience: AUTH0_AUDIENCE,
+                        scope: 'openid profile email offline_access',
                     },
                     cacheLocation: 'localstorage',
                     useRefreshTokens: true,
@@ -1590,7 +1591,13 @@ The AI will automatically extract:
         // ─── Auth Actions ───
         async function login() {
             if (auth0Client) {
-                await auth0Client.loginWithRedirect();
+                // Pass scope so the authorize call requests offline_access for
+                // refresh tokens (must match the createAuth0Client authorizationParams).
+                await auth0Client.loginWithRedirect({
+                    authorizationParams: {
+                        scope: 'openid profile email offline_access',
+                    },
+                });
             }
         }
 
