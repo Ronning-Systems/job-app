@@ -333,17 +333,31 @@ def _run_migrations(eng):
             # Structured pay range + application deadline (added 2026-07-25).
             # These are nullable so existing rows backfill to NULL; new jobs
             # populate them when the parser can extract structured pay/deadline.
+            #
+            # The DATETIME type is SQLite syntax; PostgreSQL wants TIMESTAMP.
+            # Detect the dialect and use the right DDL. Each column add is also
+            # wrapped in try/except so one bad column (e.g. an existing-but-
+            # mistyped one) doesn't abort the rest of the migration.
+            _is_pg = "postgresql" in str(eng.url)
+            _ts_type = "TIMESTAMP" if _is_pg else "DATETIME"
             for col, ddl in [
                 ("pay_range_min", "ALTER TABLE jobs ADD COLUMN pay_range_min INTEGER"),
                 ("pay_range_max", "ALTER TABLE jobs ADD COLUMN pay_range_max INTEGER"),
                 ("pay_currency", "ALTER TABLE jobs ADD COLUMN pay_currency VARCHAR DEFAULT 'USD'"),
                 ("pay_period", "ALTER TABLE jobs ADD COLUMN pay_period VARCHAR"),
-                ("application_deadline", "ALTER TABLE jobs ADD COLUMN application_deadline DATETIME"),
+                ("application_deadline", f"ALTER TABLE jobs ADD COLUMN application_deadline {_ts_type}"),
             ]:
                 if col not in existing_cols:
                     logger.info(f"Migrating: adding '{col}' column to jobs")
-                    conn.execute(text(ddl))
-                    conn.commit()
+                    try:
+                        conn.execute(text(ddl))
+                        conn.commit()
+                    except Exception as e:
+                        # Don't abort the whole migration if one column fails
+                        # (e.g. already exists from a partial prior run, or a
+                        # type mismatch). Log and continue.
+                        logger.warning(f"Migration for jobs.{col} failed: {e}")
+                        conn.rollback()
 
     # Check base_resumes table for missing columns (template fields)
     if 'base_resumes' in inspector.get_table_names():
