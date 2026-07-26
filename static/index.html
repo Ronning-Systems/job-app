@@ -1194,7 +1194,7 @@ The AI will automatically extract:
                         </select>
                         <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
                         <select id="cover-letter-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
-                            <option value="">Latest</option>
+                            <!-- Populated dynamically by openCoverLetterEditor() -->
                         </select>
                     </div>
                 </div>
@@ -1244,7 +1244,7 @@ The AI will automatically extract:
                         </select>
                         <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
                         <select id="resume-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
-                            <option value="">Current</option>
+                            <!-- Populated dynamically by openResumeEditor() -->
                         </select>
                     </div>
                 </div>
@@ -1303,6 +1303,50 @@ The AI will automatically extract:
             { value: 'gemma4:cloud', label: 'Gemma 4 · 88 tok/s' },
             { value: 'minimax-m2.7:cloud', label: 'MiniMax M2.7 · 48 tok/s' },
         ];
+
+        // Shared short labels for version dropdowns. Both resume and cover
+        // letter versions show "v{N}-{Model}" with optional "(current)" and
+        // "feedback" markers.
+        const MODEL_LABELS = {
+            'qwen3.5:cloud': 'Qwen 3.5',
+            'qwen3.5:397b-cloud': 'Qwen 3.5 (397B)',
+            'gemma4:cloud': 'Gemma 4',
+            'gemma4:31b-cloud': 'Gemma 4 31B',
+            'glm-5.1:cloud': 'GLM 5.1',
+            'glm-5:cloud': 'GLM 5',
+            'nemotron-3-super:cloud': 'Nemotron 3 Super',
+            'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
+            'minimax-m2.7:cloud': 'MiniMax M2.7',
+            'minimax-m2.5:cloud': 'MiniMax M2.5',
+            'minimax-m3:cloud': 'MiniMax M3',
+            'kimi-k2.6:cloud': 'Kimi K2.6',
+            'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
+            'deepseek-v4-flash:cloud': 'DeepSeek V4 Flash',
+            'deepseek-v4-pro:cloud': 'DeepSeek V4 Pro',
+            'gpt-oss:20b-cloud': 'GPT-OSS 20B',
+            'gpt-oss:120b-cloud': 'GPT-OSS 120B',
+            'gemini-3-flash-preview:cloud': 'Gemini 3 Flash Preview',
+            'gemma3:12b-cloud': 'Gemma 3 12B',
+            'devstral-2:123b-cloud': 'Devstral 2 123B',
+        };
+
+        // Build the options for a version dropdown. Newest first; latest gets a
+        // "(current)" suffix; revisions that came from a feedback revise get a
+        // "· feedback" suffix. Returns HTML for the option list (no enclosing
+        // <select>). Used by both the resume and cover letter editors.
+        function buildVersionOptions(revisions) {
+            const sorted = [...(revisions || [])].sort((a, b) => (b.version || 0) - (a.version || 0));
+            if (sorted.length === 0) {
+                return '<option value="">v1</option>';
+            }
+            return sorted.map((rev, idx) => {
+                const isLatest = (idx === 0);
+                const modelLabel = MODEL_LABELS[rev.model] || rev.model || 'Unknown';
+                const feedbackFlag = rev.feedback ? ' · feedback' : '';
+                const currentFlag = isLatest ? ' (current)' : '';
+                return `<option value="${rev.version}">v${rev.version}-${modelLabel}${feedbackFlag}${currentFlag}</option>`;
+            }).join('');
+        }
 
         let resumeSettings = JSON.parse(localStorage.getItem('resumeSettings')) || {
             exampleResumes: [],
@@ -2568,7 +2612,7 @@ The AI will automatically extract:
             const job = jobs.find(j => j.id === currentEditingJobId);
             if (!job || !job.resume_revisions) return;
             const version = parseInt(e.target.value);
-            if (!version) return; // "Current" selected
+            if (!version) return; // defensive: shouldn't happen since openResumeEditor always selects latest
             const rev = job.resume_revisions.find(r => r.version === version);
             if (rev) {
                 document.getElementById('resume-editor-content').value = rev.content || '';
@@ -2591,7 +2635,7 @@ The AI will automatically extract:
             const jobId = currentCoverLetterJobId;
             if (!jobId) return;
             const version = parseInt(e.target.value);
-            if (!version) return; // "Latest" selected
+            if (!version) return; // defensive: shouldn't happen with buildVersionOptions
             try {
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
                 if (!r.ok) return;
@@ -3280,11 +3324,12 @@ The AI will automatically extract:
                                         }
                                         const versionSelect = document.getElementById('cover-letter-version-select');
                                         if (versionSelect) {
-                                            const revs = (sd.revisions || []).sort((a, b) => (b.version || 0) - (a.version || 0));
-                                            if (revs.length > 1) {
-                                                versionSelect.innerHTML = '<option value="">Latest</option>' +
-                                                    revs.map(rv => `<option value="${rv.version}">Version ${rv.version}</option>`).join('');
+                                            const revs = sd.revisions || [];
+                                            if (revs.length > 0) {
+                                                versionSelect.innerHTML = buildVersionOptions(revs);
                                                 versionSelect.style.display = 'inline-block';
+                                                const latestVersion = revs.reduce((max, rv) => Math.max(max, rv.version || 0), 0);
+                                                if (latestVersion > 0) versionSelect.value = String(latestVersion);
                                             } else {
                                                 versionSelect.innerHTML = '';
                                                 versionSelect.style.display = 'none';
@@ -3717,49 +3762,17 @@ The AI will automatically extract:
                 if (revisions.length === 0) {
                     versionSelect.innerHTML = '<option value="">Current</option>';
                 } else {
-                    // Model name -> human-readable label
-                    const modelLabels = {
-                        'qwen3.5:cloud': 'Qwen 3.5',
-                        'qwen3.5:397b-cloud': 'Qwen 3.5 (397B)',
-                        'gemma4:cloud': 'Gemma 4',
-                        'gemma4:31b-cloud': 'Gemma 4 31B',
-                        'glm-5.1:cloud': 'GLM 5.1',
-                        'glm-5:cloud': 'GLM 5',
-                        'nemotron-3-super:cloud': 'Nemotron 3 Super',
-                        'nemotron-3-ultra:cloud': 'Nemotron 3 Ultra',
-                        'minimax-m2.7:cloud': 'MiniMax M2.7',
-                        'minimax-m2.5:cloud': 'MiniMax M2.5',
-                        'minimax-m3:cloud': 'MiniMax M3',
-                        'kimi-k2.6:cloud': 'Kimi K2.6',
-                        'kimi-k2.7-code:cloud': 'Kimi K2.7 Code',
-                        'deepseek-v4-flash:cloud': 'DeepSeek V4 Flash',
-                        'deepseek-v4-pro:cloud': 'DeepSeek V4 Pro',
-                        'gpt-oss:20b-cloud': 'GPT-OSS 20B',
-                        'gpt-oss:120b-cloud': 'GPT-OSS 120B',
-                        'gemini-3-flash-preview:cloud': 'Gemini 3 Flash Preview',
-                        'gemma3:12b-cloud': 'Gemma 3 12B',
-                        'devstral-2:123b-cloud': 'Devstral 2 123B',
-                    };
-                    // Show revisions newest-first
-                    const sorted = [...revisions].sort((a, b) => (b.version || 0) - (a.version || 0));
-                    let latestVersion = null;
-                    sorted.forEach((rev, idx) => {
-                        const isLatest = (idx === 0);
-                        const modelLabel = modelLabels[rev.model] || rev.model || 'Unknown';
-                        let label = `v${rev.version}-${modelLabel}`;
-                        if (isLatest) label += ' (current)';
-                        const option = document.createElement('option');
-                        option.value = rev.version;
-                        option.textContent = label;
-                        versionSelect.appendChild(option);
-                        if (isLatest) latestVersion = rev.version;
-                    });
-                    console.log('[openResumeEditor] Version dropdown populated with', sorted.length, 'options');
+                    // Build version dropdown using the shared helper so resume
+                    // and cover letter options match. Newest first; latest gets
+                    // "(current)"; revisions made via feedback get " · feedback".
+                    versionSelect.innerHTML = buildVersionOptions(revisions);
+                    console.log('[openResumeEditor] Version dropdown populated with', revisions.length, 'options');
                     // Explicitly select the latest version so the dropdown always reflects
                     // the most recent regeneration, even if the user previously picked an
                     // older one. Without this, some browsers keep the prior selection and
                     // the user sees stale content despite the dropdown showing new options.
-                    if (latestVersion != null) {
+                    const latestVersion = revisions.reduce((max, r) => Math.max(max, r.version || 0), 0);
+                    if (latestVersion > 0) {
                         versionSelect.value = String(latestVersion);
                     }
                 }
@@ -4037,11 +4050,16 @@ The AI will automatically extract:
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
                 if (r.ok) {
                     const data = await r.json();
-                    const revisions = (data.revisions || []).sort((a, b) => (b.version || 0) - (a.version || 0));
-                    if (revisions.length > 1) {
-                        versionSelect.innerHTML = '<option value="">Latest</option>' +
-                            revisions.map(r => `<option value="${r.version}">Version ${r.version}</option>`).join('');
+                    const revisions = data.revisions || [];
+                    if (revisions.length > 0) {
+                        versionSelect.innerHTML = buildVersionOptions(revisions);
                         versionSelect.style.display = 'inline-block';
+                        // Default to the latest revision so the textarea matches
+                        // the dropdown on first open.
+                        const latestVersion = revisions.reduce((max, rv) => Math.max(max, rv.version || 0), 0);
+                        if (latestVersion > 0) {
+                            versionSelect.value = String(latestVersion);
+                        }
                     } else {
                         versionSelect.innerHTML = '';
                         versionSelect.style.display = 'none';
@@ -4376,9 +4394,13 @@ The AI will automatically extract:
             }
 
             try {
+                const modelSelect = document.getElementById('resume-model-select');
+                const model = modelSelect ? modelSelect.value : null;
+                const body = { feedback };
+                if (model) body.model = model;
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-resume`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ feedback })
+                    body: JSON.stringify(body)
                 });
                 if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
                 const data = await r.json();
@@ -4403,11 +4425,12 @@ The AI will automatically extract:
                 if (isEditorMode) {
                     const versionSelect = document.getElementById('resume-version-select');
                     if (versionSelect) {
-                        const revs = (data.revisions || []).slice().sort((a, b) => (b.version || 0) - (a.version || 0));
-                        if (revs.length > 1) {
-                            versionSelect.innerHTML = '<option value="">Latest</option>' +
-                                revs.map(rv => `<option value="${rv.version}">Version ${rv.version}</option>`).join('');
+                        const revs = data.revisions || [];
+                        if (revs.length > 0) {
+                            versionSelect.innerHTML = buildVersionOptions(revs);
                             versionSelect.style.display = 'inline-block';
+                            const latestVersion = revs.reduce((max, rv) => Math.max(max, rv.version || 0), 0);
+                            if (latestVersion > 0) versionSelect.value = String(latestVersion);
                         } else {
                             versionSelect.innerHTML = '';
                             versionSelect.style.display = 'none';

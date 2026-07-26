@@ -15,6 +15,7 @@ import httpx
 import base64
 import io
 import time
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
@@ -88,6 +89,58 @@ def _extract_docx_text(file_bytes: bytes) -> str:
     except Exception as e:
         logger.error(f"python-docx failed: {e}")
         return ""
+
+
+# US state abbreviations + DC, used to recognize "City, ST" patterns in job postings.
+_US_STATE_ABBREVS = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL",
+    "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT",
+    "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
+    "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+}
+
+
+def _extract_job_location(job_description: str) -> Optional[str]:
+    """Best-effort extraction of a "City, ST" or "City, Country" location string
+    from a job description. Returns None if no clean match is found.
+
+    Used by the cover letter generator to populate the recipient address block
+    without forcing the candidate to clean it up.
+    """
+    if not job_description:
+        return None
+
+    import re
+
+    text = job_description[:4000]  # only scan the top of the description
+
+    # 1) "City, ST" where ST is a US state abbreviation. Word boundaries matter
+    #    so we don't match inside phone numbers or addresses.
+    m = re.search(
+        r"\b([A-Z][a-zA-Z\.\- ]{1,30}?),\s*([A-Z]{2})\b",
+        text,
+    )
+    if m and m.group(2) in _US_STATE_ABBREVS:
+        city = m.group(1).strip().rstrip(",")
+        return f"{city}, {m.group(2)}"
+
+    # 2) "City, Country" — country must be a capitalized word (>=3 letters).
+    m = re.search(
+        r"\b([A-Z][a-zA-Z\.\- ]{1,30}?),\s*([A-Z][a-zA-Z]{2,})\b",
+        text,
+    )
+    if m:
+        city = m.group(1).strip().rstrip(",")
+        country = m.group(2).strip()
+        # Skip obvious non-country matches (e.g., "Engineer, Team").
+        if country.lower() not in {"engineer", "team", "manager", "remote", "hybrid", "onsite", "the", "a", "an", "and", "or"}:
+            return f"{city}, {country}"
+
+    # 3) "Remote" alone.
+    if re.search(r"\b(remote|work from home|wfh)\b", text, re.IGNORECASE):
+        return "Remote"
+
+    return None
 
 
 class OllamaAgent:
@@ -684,6 +737,7 @@ Output the JSON now:"""
         target_role: Optional[str] = None,
         atoms: Optional[List[Dict[str, Any]]] = None,
         current_structured: Optional[Dict[str, Any]] = None,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Revise an existing resume based on user feedback.
@@ -701,6 +755,7 @@ Output the JSON now:"""
                 example_resumes=example_resumes,
                 atoms=atoms,
                 target_role=target_role,
+                model_override=model_override,
             )
         result = await self._revise_resume_plain(
             current_resume=current_resume,
@@ -709,6 +764,7 @@ Output the JSON now:"""
             example_resumes=example_resumes,
             template=template,
             target_role=target_role,
+            model_override=model_override,
         )
         # Plain revision path returns no structured_content. Wrap it so the
         # DOCX export path has something to render.
@@ -726,6 +782,7 @@ Output the JSON now:"""
         example_resumes: Optional[List[Dict]],
         template: Optional[Dict],
         target_role: Optional[str],
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Plain-text revision path (legacy)."""
         agent_prompt = self._load_agent_prompt("resume-generator")
@@ -783,7 +840,7 @@ CRITICAL INSTRUCTIONS:
 Output format: Plain text resume only. No JSON."""
 
         try:
-            ollama_result = await self.ollama.generate(prompt, temperature=0.7, model=self.ollama.generation_model)
+            ollama_result = await self.ollama.generate(prompt, temperature=0.7, model=model_override or self.ollama.generation_model)
             response = ollama_result.get("content", "")
             if not response:
                 raise Exception("Empty response from Ollama")
@@ -804,6 +861,7 @@ Output format: Plain text resume only. No JSON."""
         example_resumes: Optional[List[Dict]],
         atoms: List[Dict[str, Any]],
         target_role: Optional[str],
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Structured revision: feed the current structured content + feedback,
         get back a revised structured JSON.
@@ -880,7 +938,7 @@ Output the JSON now:"""
 
         try:
             ollama_result = await self.ollama.generate(
-                prompt, system=system, temperature=0.4, model=self.ollama.generation_model
+                prompt, system=system, temperature=0.4, model=model_override or self.ollama.generation_model
             )
             response = ollama_result.get("content", "")
             if not response:
@@ -974,17 +1032,26 @@ Output the JSON now:"""
             resume_section = f"\nCANDIDATE'S RESUME (use these facts; do not fabricate):\n{resume_content[:16000]}\n"
 
         job_section = ""
+        job_location = None
         if job_description:
             job_section = f"JOB DESCRIPTION:\n{job_description[:16000]}\n"
+            # Try to extract a clean "City, ST" or "City, Country" location from
+            # the description. Used to populate the recipient block.
+            job_location = _extract_job_location(job_description)
         elif company or position:
             job_section = f"TARGET ROLE: {position or 'the role'} at {company or 'the company'}\n"
+
+        today_str = datetime.utcnow().strftime("%B %d, %Y")
 
         prompt = f"""{agent_prompt}
 
 Generate a cover letter for the candidate below.
 
+TODAY_DATE: {today_str}
+
 TARGET ROLE: {target_role or position or "Not specified"}
 COMPANY: {company or "Not specified"}
+COMPANY_LOCATION: {job_location or "Not provided in the job description"}
 
 {job_section}
 
@@ -992,7 +1059,7 @@ COMPANY: {company or "Not specified"}
 
 {examples_section}
 
-Output format: Plain text cover letter only. No JSON, no markdown. Standard business letter format."""
+Output format: Plain text cover letter only. No JSON, no markdown. Standard business letter format. Use TODAY_DATE as the date — never copy a date from the example letters. Apply the Smart Address Block Rules from the system prompt above."""
 
         try:
             start = time.monotonic()
@@ -1032,9 +1099,15 @@ Output format: Plain text cover letter only. No JSON, no markdown. Standard busi
 
         job_section = f"JOB DESCRIPTION:\n{job_description[:16000]}\n" if job_description else ""
 
+        today_str = datetime.utcnow().strftime("%B %d, %Y")
+        job_location = _extract_job_location(job_description) if job_description else None
+
         prompt = f"""{agent_prompt}
 
 You are REVISING an existing cover letter based on the user's feedback.
+
+TODAY_DATE: {today_str}
+COMPANY_LOCATION: {job_location or "Not provided in the job description"}
 
 TARGET ROLE: {target_role or "Not specified"}
 

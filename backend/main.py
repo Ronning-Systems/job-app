@@ -1107,6 +1107,7 @@ async def revise_job_resume(
         BaseResume.user_id == current_user.id,
     ).first()
     atoms_for_revise = tmpl_row.atoms_json if (tmpl_row and tmpl_row.atoms_json) else None
+    model_override = request.get("model")
     resume_result = await agent_service.revise_resume(
         current_resume=existing_resume.current_content,
         feedback=feedback,
@@ -1116,6 +1117,7 @@ async def revise_job_resume(
         target_role=job.position,
         atoms=atoms_for_revise,
         current_structured=existing_resume.structured_content,
+        model_override=model_override,
     )
 
     import json
