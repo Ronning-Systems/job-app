@@ -32,6 +32,19 @@ AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "https://jobsync/api")
 ALGORITHMS = ["RS256"]
 
+# Acceptable token issuers. By default this is just the configured domain
+# (e.g. "https://auth.ronning.systems/"), but Auth0's Custom Domain feature
+# can issue tokens with either the custom-domain issuer OR the original
+# tenant issuer depending on the flow path (e.g. social connections that
+# route through login.<tenant>.auth0.com before bouncing to the SPA).
+# Comma-separated env var so operators can add the original tenant issuer
+# alongside the custom domain without code changes.
+_default_issuer = f"https://{AUTH0_DOMAIN}/" if AUTH0_DOMAIN else ""
+AUTH0_ISSUERS = [
+    iss.strip() for iss in os.getenv("AUTH0_ISSUERS", _default_issuer).split(",")
+    if iss.strip()
+]
+
 # Local-dev bypass. When AUTH_DISABLED is truthy, get_current_user returns a
 # single shared dev user without validating any token. Production must never
 # set this.
@@ -125,15 +138,15 @@ def verify_jwt(token: str) -> dict:
     from jwt.algorithms import RSAAlgorithm
     public_key = RSAAlgorithm.from_jwk(rsa_key)
 
-    issuer = f"https://{AUTH0_DOMAIN}/"
-
     try:
+        # python-jose's `issuer` accepts a string OR a list of strings —
+        # the token just needs to match one of them.
         payload = jwt.decode(
             token,
             public_key,
             algorithms=ALGORITHMS,  # Hardcoded — never accept algorithm as parameter
             audience=AUTH0_AUDIENCE,
-            issuer=issuer,
+            issuer=AUTH0_ISSUERS if len(AUTH0_ISSUERS) > 1 else (AUTH0_ISSUERS[0] if AUTH0_ISSUERS else None),
         )
         return payload
     except jwt.ExpiredSignatureError:
@@ -147,6 +160,7 @@ def verify_jwt(token: str) -> dict:
             detail="Invalid token audience",
         )
     except jwt.InvalidIssuerError:
+        logger.warning(f"Invalid token issuer (expected one of: {AUTH0_ISSUERS})")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token issuer",
