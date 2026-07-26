@@ -1572,6 +1572,79 @@ def delete_job_cover_letter(job_id: int, db: Session = Depends(get_db), current_
     return {"message": "Cover letter deleted"}
 
 
+class CoverLetterDocxRequest(BaseModel):
+    content: str
+    version: Optional[int] = None  # if provided, export that specific revision
+
+
+@app.post("/api/jobs/{job_id}/cover-letter/export-docx")
+def export_cover_letter_docx(
+    job_id: int,
+    request: CoverLetterDocxRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Build a DOCX file from the cover letter plain text and return it as base64.
+
+    Unlike resume DOCX export, cover letters have no template atoms — we
+    render the plain text as a clean, single-column document with sensible
+    defaults (Georgia 11pt, 1.15 line height, 1" margins).
+    """
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    content = (request.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Cover letter content is empty")
+
+    try:
+        import io
+        import base64
+        from docx import Document
+        from docx.shared import Pt, Inches
+        from docx.enum.text import WD_LINE_SPACING
+
+        doc = Document()
+        # Sensible defaults — Georgia 11pt is standard for cover letters.
+        style = doc.styles["Normal"]
+        style.font.name = "Georgia"
+        style.font.size = Pt(11)
+        # 1" margins all around.
+        for section in doc.sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
+
+        # Split paragraphs on blank lines; preserve hard line breaks within a paragraph.
+        for paragraph_text in content.split("\n\n"):
+            para = doc.add_paragraph()
+            para.paragraph_format.space_after = Pt(12)
+            # 1.15 line spacing reads better for prose than the default 1.08.
+            para.paragraph_format.line_spacing = 1.15
+            lines = paragraph_text.split("\n")
+            for i, line in enumerate(lines):
+                if i > 0:
+                    para.add_run().add_break()
+                para.add_run(line)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        out_bytes = buf.getvalue()
+
+        version_num = request.version or 1
+        filename = f"cover-letter-v{version_num}.docx"
+        return {
+            "docx_base64": base64.b64encode(out_bytes).decode("ascii"),
+            "filename_suggestion": filename,
+            "size_bytes": len(out_bytes),
+        }
+    except Exception as e:
+        logger.error(f"cover letter export-docx failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to build DOCX: {e}")
+
+
 # ---- Scoring agents: ATS + industry panel -----------------------------
 
 async def _do_score(job_id: int, user_id: int, artifact_type: str, artifact_id: int, score_type: str, artifact_content: str, job_description: str, target_role: Optional[str]):

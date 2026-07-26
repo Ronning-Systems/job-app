@@ -853,8 +853,9 @@
 
     <!-- Active Generation Progress Panel -->
     <div id="generation-progress-panel" style="display: none; position: fixed; bottom: 24px; right: 24px; width: 320px; background: white; border: 1px solid var(--gray-200); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); z-index: 1999; flex-direction: column; overflow: hidden;">
-        <div style="padding: 12px 16px; border-bottom: 1px solid var(--gray-200); background: var(--gray-50);">
-            <strong style="font-size: 0.9rem; color: var(--gray-800);"><i class="fas fa-sync-alt fa-spin" style="margin-right: 6px;"></i> Generating Resumes</strong>
+        <div style="padding: 12px 16px; border-bottom: 1px solid var(--gray-200); background: var(--gray-50); display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 0.9rem; color: var(--gray-800);"><i class="fas fa-sync-alt fa-spin" style="margin-right: 6px;"></i> <span id="generation-progress-title">Generating</span></strong>
+            <span id="generation-progress-count" style="font-size: 0.75rem; color: var(--gray-500);"></span>
         </div>
         <div id="generation-progress-list" style="padding: 8px 0; max-height: 240px; overflow-y: auto;">
             <!-- Populated by JS -->
@@ -1202,6 +1203,9 @@ The AI will automatically extract:
             <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <button class="btn btn-secondary" id="btn-close-cover-letter-editor-footer">Close</button>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-success" id="btn-export-cover-letter">
+                        <i class="fas fa-file-word"></i> Export DOCX
+                    </button>
                     <button class="btn btn-secondary" id="btn-regenerate-cover-letter">
                         <i class="fas fa-sync-alt"></i> Regenerate
                     </button>
@@ -1391,11 +1395,13 @@ The AI will automatically extract:
             list.innerHTML = notifications.map(n => {
                 const job = jobs.find(j => j.id === n.jobId);
                 const label = job ? `${job.position} at ${job.company}` : `Job ${n.jobId}`;
+                const isCover = n.kind === 'cover-letter';
+                const title = n.title || (isCover ? 'Cover letter ready' : 'Resume ready');
                 return `
-                    <div class="notification-item ${n.viewed ? 'viewed' : 'unread'}" data-job-id="${n.jobId}"
-                         style="padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; ${n.viewed ? 'background: white;' : 'background: var(--info-50);'}">
+                    <div class="notification-item ${n.viewed ? 'viewed' : 'unread'}" data-job-id="${n.jobId}" data-kind="${n.kind || 'resume'}"
+                         style="padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; ${n.viewed ? 'background: white;' : 'background: #eff6ff;'}">
                         <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div style="font-size: 0.85rem; color: var(--gray-800); font-weight: ${n.viewed ? '400' : '600'};">Resume ready</div>
+                            <div style="font-size: 0.85rem; color: var(--gray-800); font-weight: ${n.viewed ? '400' : '600'};">${escapeHtml(title)}</div>
                             <div style="font-size: 0.7rem; color: var(--gray-500);">${new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                         </div>
                         <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)} — v${n.version}</div>
@@ -1405,8 +1411,13 @@ The AI will automatically extract:
             list.querySelectorAll('.notification-item').forEach(item => {
                 item.addEventListener('click', () => {
                     const jobId = parseInt(item.dataset.jobId);
+                    const kind = item.dataset.kind || 'resume';
                     markNotificationsViewedForJob(jobId);
-                    openResumeEditor(jobId);
+                    if (kind === 'cover-letter') {
+                        openCoverLetterEditor(jobId);
+                    } else {
+                        openResumeEditor(jobId);
+                    }
                     document.getElementById('notification-panel').style.display = 'none';
                 });
             });
@@ -1415,24 +1426,43 @@ The AI will automatically extract:
         function renderGenerationProgress() {
             const panel = document.getElementById('generation-progress-panel');
             const list = document.getElementById('generation-progress-list');
+            const titleEl = document.getElementById('generation-progress-title');
+            const countEl = document.getElementById('generation-progress-count');
             const entries = Array.from(activeGenerations.values());
             if (entries.length === 0) {
                 panel.style.display = 'none';
+                if (titleEl) titleEl.textContent = 'Generating';
+                if (countEl) countEl.textContent = '';
                 return;
             }
             panel.style.display = 'flex';
-            list.innerHTML = entries.map(g => `
-                <div style="padding: 8px 16px; border-bottom: 1px solid var(--gray-100);">
+            if (titleEl) titleEl.textContent = 'Generating';
+            if (countEl) countEl.textContent = entries.length + (entries.length === 1 ? ' in progress' : ' in progress');
+            list.innerHTML = entries.map(g => {
+                const kindLabel = g.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
+                const kindIcon = g.kind === 'cover-letter' ? 'fa-envelope' : 'fa-file-alt';
+                const onClick = g.kind === 'cover-letter'
+                    ? `openCoverLetterEditor(${g.jobId})`
+                    : `openResumeEditor(${g.jobId})`;
+                const statusColor = g.status === 'error' ? 'var(--danger)' : 'var(--gray-600)';
+                return `
+                <div data-job-id="${g.jobId}" data-kind="${g.kind}"
+                     style="padding: 8px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer;"
+                     onclick="${onClick}">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <div style="font-size: 0.8rem; color: var(--gray-800); font-weight: 500;">${escapeHtml(g.position)} at ${escapeHtml(g.company)}</div>
+                        <div style="font-size: 0.8rem; color: var(--gray-800); font-weight: 500;">
+                            <i class="fas ${kindIcon}" style="margin-right: 4px; color: var(--primary);"></i>${escapeHtml(g.position)} at ${escapeHtml(g.company)}
+                        </div>
                         <div style="font-size: 0.7rem; color: var(--gray-500);">${g.percent}%</div>
                     </div>
-                    <div style="font-size: 0.75rem; color: var(--gray-600); margin-bottom: 5px;">${escapeHtml(g.step)}</div>
-                    <div style="height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden;">
-                        <div style="height: 100%; width: ${g.percent}%; background: var(--primary); transition: width 0.3s;"></div>
+                    <div style="font-size: 0.75rem; color: ${statusColor}; margin-bottom: 5px;">
+                        <strong>${kindLabel}:</strong> ${escapeHtml(g.step || (g.status === 'error' ? 'Error' : 'Processing'))}
                     </div>
-                </div>
-            `).join('');
+                    <div style="height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden;">
+                        <div style="height: 100%; width: ${g.percent}%; background: ${g.status === 'error' ? 'var(--danger)' : 'var(--primary)'}; transition: width 0.3s;"></div>
+                    </div>
+                </div>`;
+            }).join('');
         }
 
         function setGenerationStatus(jobId, status, step, percent) {
@@ -3137,6 +3167,7 @@ The AI will automatically extract:
                 // Register this generation for non-blocking tracking.
                 activeGenerations.set(jobId, {
                     jobId,
+                    kind: 'resume',
                     company: job.company,
                     position: job.position,
                     model: selectedModel,
@@ -3154,9 +3185,17 @@ The AI will automatically extract:
         };
 
         // Poll every active generation until all are done. Single global loop.
+        // Each entry in activeGenerations has a `kind` of either 'resume' or
+        // 'cover-letter', which determines which /status endpoint to poll and
+        // how to apply the result.
         let _generationPollTimer = null;
         async function ensureGenerationPoller() {
             if (_generationPollTimer) return;
+
+            const statusEndpoint = (kind, jobId) =>
+                kind === 'cover-letter'
+                    ? `${API_URL}/jobs/${jobId}/generate-cover-letter/status`
+                    : `${API_URL}/jobs/${jobId}/generate-resume/status`;
 
             const pollLoop = async () => {
                 if (activeGenerations.size === 0) {
@@ -3164,9 +3203,9 @@ The AI will automatically extract:
                     return;
                 }
 
-                const checks = Array.from(activeGenerations.keys()).map(async (jobId) => {
+                const checks = Array.from(activeGenerations.entries()).map(async ([jobId, gen]) => {
                     try {
-                        const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-resume/status`);
+                        const r = await apiFetch(statusEndpoint(gen.kind, jobId));
                         if (!r.ok) {
                             setGenerationStatus(jobId, 'error', 'Failed to check status', 0);
                             return { jobId, error: 'status check failed' };
@@ -3175,27 +3214,51 @@ The AI will automatically extract:
 
                         if (result.status === 'completed') {
                             const job = jobs.find(j => j.id === jobId);
-                            if (job) {
+                            if (gen.kind === 'resume' && job) {
                                 job.generated_resume = result.resume;
                                 job.resume_revisions = result.revisions || [];
                                 job.structured_content = result.structured_content || null;
                                 job.atoms_snapshot = result.atoms_snapshot || null;
+                            } else if (gen.kind === 'cover-letter' && job) {
+                                job.has_cover_letter = true;
+                                job.cover_letter = result.cover_letter || '';
+                                job.cover_letter_revisions = result.revisions || [];
                             }
                             await fetchJobs();
-                            const refreshedJob = jobs.find(j => j.id === jobId);
-                            if (refreshedJob && job) {
-                                job.generated_resume = refreshedJob.generated_resume;
-                                job.resume_revisions = refreshedJob.resume_revisions || [];
-                                job.structured_content = refreshedJob.structured_content || null;
-                                job.atoms_snapshot = refreshedJob.atoms_snapshot || null;
+
+                            // Re-apply freshly fetched fields (in case list returned
+                            // a slightly different shape).
+                            if (gen.kind === 'resume') {
+                                const refreshedJob = jobs.find(j => j.id === jobId);
+                                if (refreshedJob && job) {
+                                    job.generated_resume = refreshedJob.generated_resume;
+                                    job.resume_revisions = refreshedJob.resume_revisions || [];
+                                    job.structured_content = refreshedJob.structured_content || null;
+                                    job.atoms_snapshot = refreshedJob.atoms_snapshot || null;
+                                }
+                            } else if (gen.kind === 'cover-letter') {
+                                const refreshedJob = jobs.find(j => j.id === jobId);
+                                if (refreshedJob && job) {
+                                    job.has_cover_letter = refreshedJob.has_cover_letter;
+                                    job.cover_letter = refreshedJob.cover_letter;
+                                    job.cover_letter_revisions = refreshedJob.cover_letter_revisions || [];
+                                }
+                                updateCoverLetterButton(job);
                             }
+                            renderJobs();
 
                             const version = result.version || 1;
-                            const gen = activeGenerations.get(jobId);
-                            const modelLabel = result.revisions?.[result.revisions.length - 1]?.model || gen?.model || getDefaultModel();
+                            const modelLabel = result.revisions?.[result.revisions.length - 1]?.model
+                                || gen.model
+                                || getDefaultModel();
+                            const kindTitle = gen.kind === 'cover-letter' ? 'Cover letter ready' : 'Resume ready';
                             addNotification({
-                                id: `gen-${jobId}-${version}-${Date.now()}`,
+                                id: `gen-${gen.kind}-${jobId}-${version}-${Date.now()}`,
                                 jobId,
+                                kind: gen.kind,
+                                title: kindTitle,
+                                company: gen.company,
+                                position: gen.position,
                                 version,
                                 model: modelLabel,
                                 timestamp: new Date().toISOString(),
@@ -3203,25 +3266,48 @@ The AI will automatically extract:
                             });
 
                             // If this job's editor is currently open, refresh it in place.
-                            if (currentEditingJobId === jobId) {
+                            if (gen.kind === 'resume' && currentEditingJobId === jobId) {
                                 openResumeEditor(jobId);
+                            } else if (gen.kind === 'cover-letter' && currentCoverLetterJobId === jobId) {
+                                // Re-fetch the status and update the editor textarea.
+                                try {
+                                    const rs = await apiFetch(statusEndpoint(gen.kind, jobId));
+                                    if (rs.ok) {
+                                        const sd = await rs.json();
+                                        const editorContent = document.getElementById('cover-letter-editor-content');
+                                        if (editorContent && sd.cover_letter) {
+                                            editorContent.value = sd.cover_letter;
+                                        }
+                                        const versionSelect = document.getElementById('cover-letter-version-select');
+                                        if (versionSelect) {
+                                            const revs = (sd.revisions || []).sort((a, b) => (b.version || 0) - (a.version || 0));
+                                            if (revs.length > 1) {
+                                                versionSelect.innerHTML = '<option value="">Latest</option>' +
+                                                    revs.map(rv => `<option value="${rv.version}">Version ${rv.version}</option>`).join('');
+                                                versionSelect.style.display = 'inline-block';
+                                            } else {
+                                                versionSelect.innerHTML = '';
+                                                versionSelect.style.display = 'none';
+                                            }
+                                        }
+                                    }
+                                } catch (err) { console.error(err); }
                             }
 
                             removeActiveGeneration(jobId);
 
-                            if (result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
-                                // Non-blocking alert for quality issue.
+                            if (gen.kind === 'resume' && result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
                                 setTimeout(() => {
                                     alert(`Heads up: the resume for ${job?.position || 'job ' + jobId} returned mostly empty structured content. Try regenerating with Qwen 3.5.`);
                                 }, 0);
                             }
                             return { jobId, done: true };
                         } else if (result.status === 'error') {
-                            const gen = activeGenerations.get(jobId);
                             const genJob = jobs.find(j => j.id === jobId);
+                            const kindLabel = gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
                             setGenerationStatus(jobId, 'error', result.error || 'Generation failed', 0);
                             removeActiveGeneration(jobId);
-                            alert(`Resume generation failed for ${genJob?.position || gen?.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
+                            alert(`${kindLabel} generation failed for ${genJob?.position || gen.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
                             return { jobId, error: result.error };
                         } else {
                             setGenerationStatus(jobId, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(jobId)?.percent) || 0);
@@ -3915,6 +4001,9 @@ The AI will automatically extract:
         document.getElementById('btn-revise-cover-letter').addEventListener('click', () => {
             if (currentCoverLetterJobId) reviseCoverLetter(currentCoverLetterJobId);
         });
+        document.getElementById('btn-export-cover-letter').addEventListener('click', () => {
+            if (currentCoverLetterJobId) exportCoverLetterToDocx(currentCoverLetterJobId);
+        });
         coverLetterEditorModal.addEventListener('click', (e) => {
             if (e.target === coverLetterEditorModal) coverLetterEditorModal.classList.remove('active');
         });
@@ -4027,59 +4116,69 @@ The AI will automatically extract:
             if (panel) panel.style.display = 'block';
         });
 
-        // ─── Cover letter generation + revision ───
-        async function generateCoverLetter(jobId) {
-            try {
-                const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
-                });
-                if (!r.ok) throw new Error('Failed to start generation');
-                pollCoverLetterStatus(jobId);
-            } catch (err) { alert('Error: ' + err.message); }
-        }
+        // ─── Cover letter generation + revision (queue-backed) ───
+        window.generateCoverLetter = async function(jobId) {
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
 
-        async function pollCoverLetterStatus(jobId) {
-            const panel = document.getElementById('cover-letter-content');
-            if (panel) panel.innerHTML = '<em style="color:var(--gray-500)">Generating cover letter...</em>';
-            const editorContent = document.getElementById('cover-letter-editor-content');
-            if (editorContent && currentCoverLetterJobId === jobId) {
-                editorContent.value = '(Generating cover letter...)';
+            // Avoid double-kicking the same job while one is already running.
+            if (activeGenerations.has(jobId)) {
+                console.log('[generateCoverLetter] Generation already in progress for job', jobId);
+                return;
             }
-            const max = 120, delay = 2000;
-            for (let i = 0; i < max; i++) {
-                await new Promise(res => setTimeout(res, delay));
-                try {
-                    const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
-                    if (!r.ok) continue;
-                    const data = await r.json();
-                    if (data.status === 'completed') {
-                        if (panel) panel.textContent = data.cover_letter || '';
-                        const revisionsEl = document.getElementById('cover-letter-revisions');
-                        if (revisionsEl) revisionsEl.textContent = (data.revisions || []).length + ' revision(s)';
-                        if (editorContent && currentCoverLetterJobId === jobId) {
-                            editorContent.value = data.cover_letter || '';
-                        }
-                        // Refresh the local job state so updateCoverLetterButton reflects the new state
-                        const jobIdx = jobs.findIndex(j => j.id === jobId);
-                        if (jobIdx !== -1) {
-                            jobs[jobIdx].has_cover_letter = true;
-                            jobs[jobIdx].cover_letter = data.cover_letter || '';
-                            jobs[jobIdx].cover_letter_revisions = data.revisions || [];
-                            updateCoverLetterButton(jobs[jobIdx]);
-                            renderJobs();
-                        }
-                        await fetchJobs();
-                        addNotification({ id: 'cl-' + jobId, jobId, company: '', position: '', version: data.version, model: '', timestamp: new Date().toISOString(), title: 'Cover letter ready' });
-                        return;
+
+            // Determine model: prefer the editor dropdown if it's open and has a value,
+            // otherwise fall back to the user's default.
+            const modelSelect = document.getElementById('cover-letter-model-select');
+            let selectedModel = modelSelect ? modelSelect.value : null;
+            if (!selectedModel) selectedModel = DEFAULT_MODEL;
+
+            try {
+                const response = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: selectedModel })
+                });
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || 'Failed to start cover letter generation');
+                }
+
+                const result = await response.json();
+
+                // Backwards compat: if server returned the cover letter synchronously,
+                // apply it immediately and skip polling.
+                if (result.cover_letter) {
+                    const jobIdx = jobs.findIndex(j => j.id === jobId);
+                    if (jobIdx !== -1) {
+                        jobs[jobIdx].has_cover_letter = true;
+                        jobs[jobIdx].cover_letter = result.cover_letter;
+                        jobs[jobIdx].cover_letter_revisions = result.revisions || [];
                     }
-                    if (data.status === 'error') {
-                        if (panel) panel.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(data.error || '') + '</em>';
-                        return;
-                    }
-                } catch (err) { /* keep polling */ }
+                    await fetchJobs();
+                    updateCoverLetterButton(jobs[jobIdx >= 0 ? jobIdx : jobs.findIndex(j => j.id === jobId)]);
+                    renderJobs();
+                    return;
+                }
+
+                // Register this generation for non-blocking tracking.
+                activeGenerations.set(jobId, {
+                    jobId,
+                    kind: 'cover-letter',
+                    company: job.company,
+                    position: job.position,
+                    model: selectedModel,
+                    step: 'Queued',
+                    percent: 0,
+                    status: 'processing',
+                    startTime: Date.now(),
+                });
+                renderGenerationProgress();
+                ensureGenerationPoller();
+            } catch (err) {
+                alert('Error: ' + err.message);
             }
-            if (panel) panel.innerHTML = '<em style="color:var(--gray-500)">Timed out waiting for generation.</em>';
-        }
+        };
 
         async function reviseCoverLetter(jobId) {
             // Use the editor modal's feedback textarea if it's open, otherwise fall back to the detail panel
@@ -4098,7 +4197,26 @@ The AI will automatically extract:
             if (!feedback) { alert('Enter feedback for the agent first.'); return; }
 
             const modelSelect = document.getElementById('cover-letter-model-select');
-            const model = modelSelect ? modelSelect.value : null;
+            const model = modelSelect ? modelSelect.value : DEFAULT_MODEL;
+
+            // Show immediate feedback that the agent is working — the LLM call
+            // can take 10-60+ seconds, and the user reported no indication.
+            if (contentEl) {
+                const originalDisplay = contentEl.tagName === 'TEXTAREA' || contentEl.tagName === 'INPUT' ? contentEl.value : contentEl.textContent;
+                if (contentEl.tagName === 'TEXTAREA' || contentEl.tagName === 'INPUT') {
+                    contentEl.value = '(Revising cover letter with agent...)';
+                } else {
+                    contentEl.textContent = '(Revising cover letter with agent...)';
+                }
+            }
+            const btn = isEditorMode
+                ? document.getElementById('btn-revise-cover-letter')
+                : document.querySelector(`button[onclick="reviseCoverLetter(${jobId})"]`);
+            if (btn) {
+                btn.disabled = true;
+                btn.dataset._origLabel = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Revising...';
+            }
 
             try {
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-cover-letter`, {
@@ -4124,9 +4242,88 @@ The AI will automatically extract:
                     jobs[jobIdx].has_cover_letter = true;
                     jobs[jobIdx].cover_letter = data.cover_letter || '';
                     jobs[jobIdx].cover_letter_revisions = data.revisions || [];
+                    updateCoverLetterButton(jobs[jobIdx]);
                     renderJobs();
                 }
-            } catch (err) { alert('Error: ' + err.message); }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = btn.dataset._origLabel || btn.innerHTML;
+                }
+            }
+        }
+
+        async function exportCoverLetterToDocx(jobId) {
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            const textarea = document.getElementById('cover-letter-editor-content');
+            const content = textarea ? textarea.value.trim() : '';
+            if (!content || content.startsWith('(') || content.startsWith('No ')) {
+                alert('No cover letter content to export. Generate or revise one first.');
+                return;
+            }
+
+            // Derive version from the dropdown, or fall back to latest revision
+            const versionSelect = document.getElementById('cover-letter-version-select');
+            let versionNum = 1;
+            if (versionSelect && versionSelect.value) {
+                versionNum = parseInt(versionSelect.value, 10) || 1;
+            } else if (job.cover_letter_revisions && job.cover_letter_revisions.length > 0) {
+                versionNum = Math.max(...job.cover_letter_revisions.map(r => r.version || 0));
+            }
+
+            const btn = document.getElementById('btn-export-cover-letter');
+            const origLabel = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Building DOCX...';
+            }
+
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/cover-letter/export-docx`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content, version: versionNum }),
+                });
+                if (!r.ok) {
+                    const errText = await r.text().catch(() => '');
+                    console.error('[export DOCX] cover-letter export-docx failed:', r.status, errText);
+                    const err = (() => { try { return JSON.parse(errText); } catch (e) { return { detail: errText }; } })();
+                    throw new Error(err.detail || `compose failed: ${r.status}`);
+                }
+                const data = await r.json();
+
+                const bytes = Uint8Array.from(atob(data.docx_base64), c => c.charCodeAt(0));
+                const blob = new Blob([bytes], {
+                    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+
+                const today = new Date();
+                const yyyymmdd = today.toISOString().slice(0, 10).replace(/-/g, '');
+                const role = (job.position || 'Cover Letter').replace(/[\\/:*?"<>|]/g, '').trim();
+                const employer = (job.company || 'Unknown').replace(/[\\/:*?"<>|]/g, '').trim();
+
+                const filename = `${yyyymmdd} - ${role} at ${employer} - Cover Letter V${versionNum}.docx`;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error('Export cover letter DOCX failed:', err);
+                alert('Failed to export DOCX: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = origLabel;
+                }
+            }
         }
 
         async function deleteCoverLetter(jobId) {
@@ -4148,7 +4345,7 @@ The AI will automatically extract:
         }
 
         // Resume feedback-to-agent (uses existing revise-resume route)
-        async function reviseResume(jobId) {
+        window.reviseResume = async function(jobId) {
             // Use the editor modal's feedback textarea if it's open, otherwise fall back to the detail panel
             const editorModal = document.getElementById('resume-editor-modal');
             const isEditorMode = !!editorModal && editorModal.classList.contains('active');
@@ -4157,6 +4354,27 @@ The AI will automatically extract:
                 : document.getElementById('resume-feedback-input');
             const feedback = feedbackEl ? feedbackEl.value.trim() : '';
             if (!feedback) { alert('Enter feedback for the agent first.'); return; }
+
+            // Immediate UI feedback — the LLM revision can take 10-60+ seconds.
+            // Disable both buttons + show a placeholder so the user knows it's working.
+            const reviseBtn = isEditorMode
+                ? document.getElementById('btn-revise-resume')
+                : document.querySelector(`button[onclick="reviseResume(${jobId})"]`);
+            if (reviseBtn) {
+                reviseBtn.disabled = true;
+                reviseBtn.dataset._origLabel = reviseBtn.innerHTML;
+                reviseBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Revising...';
+            }
+            const inlineContent = document.getElementById('resume-content');
+            const hadInlineContent = !!inlineContent;
+            if (hadInlineContent) {
+                inlineContent.innerHTML = '<em style="color:var(--gray-500)">(Revising resume with agent...)</em>';
+            }
+            const editorContent = document.getElementById('resume-editor-content');
+            if (isEditorMode && editorContent) {
+                editorContent.value = '(Revising resume with agent...)';
+            }
+
             try {
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-resume`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4165,16 +4383,59 @@ The AI will automatically extract:
                 if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
                 const data = await r.json();
                 // Update the inline detail panel
-                const inlineContent = document.getElementById('resume-content');
                 if (inlineContent) inlineContent.textContent = data.resume || '';
                 const inlineRevisions = document.getElementById('resume-revisions');
                 if (inlineRevisions) inlineRevisions.textContent = (data.revisions || []).length + ' revision(s)';
                 // Update the editor modal if open
-                const editorContent = document.getElementById('resume-editor-content');
                 if (isEditorMode && editorContent) editorContent.value = data.resume || '';
                 if (feedbackEl) feedbackEl.value = '';
-            } catch (err) { alert('Error: ' + err.message); }
-        }
+
+                // Refresh local state + version selector so the user can pick the
+                // new version immediately.
+                const jobIdx = jobs.findIndex(j => j.id === jobId);
+                if (jobIdx !== -1) {
+                    jobs[jobIdx].generated_resume = data.resume;
+                    jobs[jobIdx].resume_revisions = data.revisions || [];
+                    renderJobs();
+                }
+                // If the editor modal is open, refresh its version dropdown so the
+                // user can switch between revisions without re-opening.
+                if (isEditorMode) {
+                    const versionSelect = document.getElementById('resume-version-select');
+                    if (versionSelect) {
+                        const revs = (data.revisions || []).slice().sort((a, b) => (b.version || 0) - (a.version || 0));
+                        if (revs.length > 1) {
+                            versionSelect.innerHTML = '<option value="">Latest</option>' +
+                                revs.map(rv => `<option value="${rv.version}">Version ${rv.version}</option>`).join('');
+                            versionSelect.style.display = 'inline-block';
+                        } else {
+                            versionSelect.innerHTML = '';
+                            versionSelect.style.display = 'none';
+                        }
+                    }
+                    // Re-populate structured editor if applicable
+                    const latestRev = (data.revisions || []).slice().sort((a, b) => (b.version || 0) - (a.version || 0))[0];
+                    if (latestRev && latestRev.structured_content) {
+                        currentStructuredContent = JSON.parse(JSON.stringify(latestRev.structured_content));
+                        renderStructuredEditor(currentStructuredContent);
+                    }
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+                // Restore the inline content to its prior state on failure.
+                if (hadInlineContent && inlineContent) {
+                    const jobIdx = jobs.findIndex(j => j.id === jobId);
+                    if (jobIdx !== -1 && jobs[jobIdx].generated_resume) {
+                        inlineContent.textContent = jobs[jobIdx].generated_resume;
+                    }
+                }
+            } finally {
+                if (reviseBtn) {
+                    reviseBtn.disabled = false;
+                    reviseBtn.innerHTML = reviseBtn.dataset._origLabel || reviseBtn.innerHTML;
+                }
+            }
+        };
 
         // ─── Scoring (ATS + industry panel) ───
         async function scoreAll(jobId) {
