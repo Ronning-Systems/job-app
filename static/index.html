@@ -1271,6 +1271,13 @@ The AI will automatically extract:
                         <i class="fas fa-file-word"></i> Export DOCX
                     </button>
                 </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex: 1; min-width: 280px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--gray-200);">
+                    <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-comment"></i> Feedback to agent:</span>
+                    <textarea id="resume-editor-feedback" rows="1" placeholder="e.g. Make the lead bullet more quantified; emphasize the AWS migration." style="flex: 1; min-width: 200px; padding: 6px 8px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 0.85rem;"></textarea>
+                    <button class="btn btn-primary" id="btn-revise-resume">
+                        <i class="fas fa-pen-to-square"></i> Revise with Feedback
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2502,6 +2509,12 @@ The AI will automatically extract:
         document.getElementById('btn-regenerate-resume').addEventListener('click', async () => {
             if (currentEditingJobId) {
                 await generateResume(currentEditingJobId);
+            }
+        });
+
+        document.getElementById('btn-revise-resume').addEventListener('click', () => {
+            if (currentEditingJobId) {
+                reviseResume(currentEditingJobId);
             }
         });
 
@@ -4136,7 +4149,13 @@ The AI will automatically extract:
 
         // Resume feedback-to-agent (uses existing revise-resume route)
         async function reviseResume(jobId) {
-            const feedback = document.getElementById('resume-feedback-input').value.trim();
+            // Use the editor modal's feedback textarea if it's open, otherwise fall back to the detail panel
+            const editorModal = document.getElementById('resume-editor-modal');
+            const isEditorMode = !!editorModal && editorModal.classList.contains('active');
+            const feedbackEl = isEditorMode
+                ? document.getElementById('resume-editor-feedback')
+                : document.getElementById('resume-feedback-input');
+            const feedback = feedbackEl ? feedbackEl.value.trim() : '';
             if (!feedback) { alert('Enter feedback for the agent first.'); return; }
             try {
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-resume`, {
@@ -4145,9 +4164,15 @@ The AI will automatically extract:
                 });
                 if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
                 const data = await r.json();
-                document.getElementById('resume-content').textContent = data.resume || '';
-                document.getElementById('resume-revisions').textContent = (data.revisions || []).length + ' revision(s)';
-                document.getElementById('resume-feedback-input').value = '';
+                // Update the inline detail panel
+                const inlineContent = document.getElementById('resume-content');
+                if (inlineContent) inlineContent.textContent = data.resume || '';
+                const inlineRevisions = document.getElementById('resume-revisions');
+                if (inlineRevisions) inlineRevisions.textContent = (data.revisions || []).length + ' revision(s)';
+                // Update the editor modal if open
+                const editorContent = document.getElementById('resume-editor-content');
+                if (isEditorMode && editorContent) editorContent.value = data.resume || '';
+                if (feedbackEl) feedbackEl.value = '';
             } catch (err) { alert('Error: ' + err.message); }
         }
 
