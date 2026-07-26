@@ -55,6 +55,28 @@ ops conventions.
 - Public: `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
 - Tailscale-only fallback: `https://job-app.patrick-mini.ts.net`
 
+## Database migrations — Alembic
+
+Schema migrations are managed by **Alembic** (config in `backend/alembic.ini`,
+migrations in `backend/alembic/versions/`). The app runs migrations
+automatically on startup via `models.init_db()` → `alembic upgrade head`.
+
+- **Adding a column/table**: change the model in `backend/models.py`, then
+  generate a migration with `cd backend && python3 -m alembic revision
+  --autogenerate -m "<description>"`. Review the generated file (autogenerate
+  is not perfect — check for dropped columns it shouldn't touch), commit it,
+  redeploy. `init_db` applies it on next startup.
+- **Existing DB that predates Alembic**: `init_db` detects the absence of the
+  `alembic_version` table and `stamp`s the DB at the current head (marks the
+  schema as current without trying to recreate existing tables), so the
+  production DB was a one-time `stamp` — done. Subsequent deploys just
+  `upgrade head`.
+- **Never hand-write `ALTER TABLE`** in `_run_migrations`-style blocks —
+  the old hand-rolled migration system was removed (it had a DATETIME-vs-
+  TIMESTAMP dialect bug that broke the prod deploy for 5 runs). Use Alembic.
+- The baseline revision is `453348d81a12` (matches the schema as of the
+  2026-07-25 redesign). The production DB is stamped at that revision.
+
 ## Other notes
 
 - **Single template per user**: `BaseResume` table enforces one row with

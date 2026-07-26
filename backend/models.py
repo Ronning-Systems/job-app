@@ -1,6 +1,7 @@
 import os
 import logging
 import secrets
+from pathlib import Path
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
@@ -241,137 +242,78 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db():
+    """Initialize/migrate the database via Alembic.
+
+    On a fresh DB: `alembic upgrade head` creates all tables from the
+    baseline migration.
+
+    On an existing DB that predates Alembic (no `alembic_version` table):
+    stamp it at the baseline revision so the schema is marked as current
+    without trying to recreate existing tables, then upgrade to head.
+
+    On a DB already tracked by Alembic: `alembic upgrade head` applies any
+    pending migrations.
+
+    Falls back to Base.metadata.create_all only if Alembic can't run
+    (e.g. package missing in a stripped dev env) — that path creates
+    missing tables but does NOT run column-level migrations.
+    """
     try:
-        Base.metadata.create_all(bind=engine)
-        _run_migrations(engine)
+        _run_alembic_upgrade()
     except Exception as e:
-        logger.error(f"Database init failed: {e}")
+        logger.error(f"Alembic migration failed: {e}")
         if not DATABASE_URL:
             raise  # SQLite should always work
-        # For PostgreSQL, log but don't crash — the app can retry on first request
-        logger.warning("PostgreSQL connection failed during startup; will retry on first request")
+        logger.warning("PostgreSQL migration failed during startup; will retry on first request")
 
 
-def _run_migrations(eng):
-    """Add missing columns to existing tables (create_all only creates missing tables)."""
-    from sqlalchemy import text, inspect
-    inspector = inspect(eng)
+def _run_alembic_upgrade():
+    """Run `alembic upgrade head` against the app's engine.
 
-    # Check generated_resumes table for missing columns
-    if 'generated_resumes' in inspector.get_table_names():
-        existing_cols = [c['name'] for c in inspector.get_columns('generated_resumes')]
-        with eng.connect() as conn:
-            if 'revisions' not in existing_cols:
-                logger.info("Migrating: adding 'revisions' column to generated_resumes")
-                conn.execute(text(
-                    "ALTER TABLE generated_resumes ADD COLUMN revisions JSON DEFAULT '[]'::json"
-                ))
-                conn.commit()
-            if 'current_content' not in existing_cols:
-                logger.info("Migrating: adding 'current_content' column to generated_resumes")
-                conn.execute(text(
-                    "ALTER TABLE generated_resumes ADD COLUMN current_content TEXT"
-                ))
-                conn.commit()
-            if 'user_id' not in existing_cols:
-                logger.info("Migrating: adding 'user_id' column to generated_resumes")
-                conn.execute(text(
-                    "ALTER TABLE generated_resumes ADD COLUMN user_id INTEGER REFERENCES users(id)"
-                ))
-                conn.commit()
-            if 'structured_content' not in existing_cols:
-                logger.info("Migrating: adding 'structured_content' column to generated_resumes")
-                conn.execute(text(
-                    "ALTER TABLE generated_resumes ADD COLUMN structured_content JSON"
-                ))
-                conn.commit()
-            if 'atoms_snapshot' not in existing_cols:
-                logger.info("Migrating: adding 'atoms_snapshot' column to generated_resumes")
-                conn.execute(text(
-                    "ALTER TABLE generated_resumes ADD COLUMN atoms_snapshot JSON"
-                ))
-                conn.commit()
+    If the DB has tables but no alembic_version table, it predates Alembic
+    (the existing production DB). Stamp it at the baseline revision so we
+    don't try to recreate existing tables, then upgrade to head.
+    """
+    from sqlalchemy import inspect, text
 
-    # Check jobs table for missing columns (public_job_id)
-    if 'jobs' in inspector.get_table_names():
-        existing_cols = [c['name'] for c in inspector.get_columns('jobs')]
-        with eng.connect() as conn:
-            if 'public_job_id' not in existing_cols:
-                logger.info("Migrating: adding 'public_job_id' column to jobs")
-                # Use VARCHAR(32) for both SQLite and PostgreSQL — SQLite is type-affinity loose.
-                conn.execute(text(
-                    "ALTER TABLE jobs ADD COLUMN public_job_id VARCHAR(32)"
-                ))
-                conn.commit()
-                # Backfill any existing rows with a unique code
-                rows = conn.execute(text("SELECT id FROM jobs WHERE public_job_id IS NULL")).fetchall()
-                for row in rows:
-                    job_id = row[0]
-                    for _ in range(10):  # try up to 10 times to dodge the rare collision
-                        candidate = generate_public_job_id()
-                        existing = conn.execute(
-                            text("SELECT 1 FROM jobs WHERE public_job_id = :pid"),
-                            {"pid": candidate},
-                        ).first()
-                        if not existing:
-                            conn.execute(
-                                text("UPDATE jobs SET public_job_id = :pid WHERE id = :id"),
-                                {"pid": candidate, "id": job_id},
-                            )
-                            break
-                conn.commit()
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
 
-            # Add unique index on public_job_id (idempotent)
-            try:
-                conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_public_job_id ON jobs (public_job_id)"
-                ))
-                conn.commit()
-            except Exception as e:
-                logger.debug(f"Unique index on public_job_id may already exist: {e}")
+    has_alembic_version = "alembic_version" in tables
+    has_app_tables = any(t in tables for t in ("users", "jobs", "job_applications"))
 
-            # Structured pay range + application deadline (added 2026-07-25).
-            # These are nullable so existing rows backfill to NULL; new jobs
-            # populate them when the parser can extract structured pay/deadline.
-            #
-            # The DATETIME type is SQLite syntax; PostgreSQL wants TIMESTAMP.
-            # Detect the dialect and use the right DDL. Each column add is also
-            # wrapped in try/except so one bad column (e.g. an existing-but-
-            # mistyped one) doesn't abort the rest of the migration.
-            _is_pg = "postgresql" in str(eng.url)
-            _ts_type = "TIMESTAMP" if _is_pg else "DATETIME"
-            for col, ddl in [
-                ("pay_range_min", "ALTER TABLE jobs ADD COLUMN pay_range_min INTEGER"),
-                ("pay_range_max", "ALTER TABLE jobs ADD COLUMN pay_range_max INTEGER"),
-                ("pay_currency", "ALTER TABLE jobs ADD COLUMN pay_currency VARCHAR DEFAULT 'USD'"),
-                ("pay_period", "ALTER TABLE jobs ADD COLUMN pay_period VARCHAR"),
-                ("application_deadline", f"ALTER TABLE jobs ADD COLUMN application_deadline {_ts_type}"),
-            ]:
-                if col not in existing_cols:
-                    logger.info(f"Migrating: adding '{col}' column to jobs")
-                    try:
-                        conn.execute(text(ddl))
-                        conn.commit()
-                    except Exception as e:
-                        # Don't abort the whole migration if one column fails
-                        # (e.g. already exists from a partial prior run, or a
-                        # type mismatch). Log and continue.
-                        logger.warning(f"Migration for jobs.{col} failed: {e}")
-                        conn.rollback()
-
-    # Check base_resumes table for missing columns (template fields)
-    if 'base_resumes' in inspector.get_table_names():
-        existing_cols = [c['name'] for c in inspector.get_columns('base_resumes')]
-        with eng.connect() as conn:
-            if 'atoms_json' not in existing_cols:
-                logger.info("Migrating: adding 'atoms_json' column to base_resumes")
-                # JSON column — PostgreSQL native, SQLite stores as TEXT.
-                conn.execute(text("ALTER TABLE base_resumes ADD COLUMN atoms_json JSON"))
-                conn.commit()
-            if 'docx_base64' not in existing_cols:
-                logger.info("Migrating: adding 'docx_base64' column to base_resumes")
-                conn.execute(text("ALTER TABLE base_resumes ADD COLUMN docx_base64 TEXT"))
-                conn.commit()
+    if has_app_tables and not has_alembic_version:
+        # Existing DB that predates Alembic (e.g. the production DB created
+        # by the old hand-rolled migrations). Stamp it at the baseline
+        # revision so alembic doesn't try to recreate the existing tables.
+        logger.info("Existing DB without alembic_version — stamping at baseline")
+        from alembic import command
+        from alembic.config import Config
+        cfg = Config(str(Path(__file__).parent / "alembic.ini"))
+        cfg.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
+        cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        command.stamp(cfg, "head")
+        logger.info("Stamped DB at baseline revision")
+    elif not has_app_tables and not has_alembic_version:
+        # Truly fresh DB — let alembic create everything from the baseline.
+        logger.info("Fresh DB — running alembic upgrade head")
+        from alembic import command
+        from alembic.config import Config
+        cfg = Config(str(Path(__file__).parent / "alembic.ini"))
+        cfg.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
+        cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        command.upgrade(cfg, "head")
+        logger.info("Fresh DB created via alembic upgrade head")
+    else:
+        # DB already tracked by Alembic — apply pending migrations.
+        logger.info("Running alembic upgrade head (apply pending migrations)")
+        from alembic import command
+        from alembic.config import Config
+        cfg = Config(str(Path(__file__).parent / "alembic.ini"))
+        cfg.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
+        cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        command.upgrade(cfg, "head")
+        logger.info("Migrations applied")
 
 
 def get_db():
