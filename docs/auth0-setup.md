@@ -19,6 +19,9 @@ This guide walks through configuring Auth0 as the identity provider for Joblign.
 2. Name it `Joblign` and select **Single Page Web Applications** as the application type.
 3. In the **Settings** tab, configure:
 
+   **Application Login URI:** `https://joblign.ronning.systems`
+   *(Where Auth0 should redirect users who hit the tenant URL directly. Point this at the SPA, not the Auth0 domain itself.)*
+
    **Allowed Callback URLs:**
    ```
    http://localhost:8765, https://joblign.ronning.systems
@@ -33,6 +36,14 @@ This guide walks through configuring Auth0 as the identity provider for Joblign.
    ```
    http://localhost:8765, https://joblign.ronning.systems
    ```
+
+   > **Safari + custom domain gotcha:** all three of the lists above MUST include
+   > the SPA's exact origin (e.g. `https://joblign.ronning.systems`). Safari's
+   > Intelligent Tracking Prevention blocks cross-origin POSTs to the token
+   > endpoint if the SPA origin isn't in **Web Origins**. Missing entries here
+   > cause silent refresh failures and (with the old `logout()`-on-error flow)
+   > redirect cycles. The current production settings already include the right
+   > entries — keep them when re-creating the SPA in a new tenant.
 
 4. Under **Advanced Settings** > **Grant Types**, ensure **Authorization Code** and **Refresh Token** are enabled.
 5. Set **Token Endpoint Authentication** to **None** (this is a SPA — it uses PKCE, not a client secret).
@@ -79,7 +90,7 @@ The following values are already configured in the deployed application:
 
 | Variable | Value |
 |---|---|
-| `AUTH0_DOMAIN` | `dev-saxftot48835pavp.us.auth0.com` |
+| `AUTH0_DOMAIN` | `auth.ronning.systems` |
 | `AUTH0_CLIENT_ID` | `sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8` |
 | `AUTH0_AUDIENCE` | `https://jobsync/api` (opaque, do not rename) |
 | `CORS_ORIGIN` | `https://joblign.ronning.systems` |
