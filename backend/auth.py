@@ -51,8 +51,10 @@ AUTH0_ISSUERS = [
 AUTH_DISABLED = os.getenv("AUTH_DISABLED", "").lower() in ("1", "true", "yes")
 DEV_USER_AUTH0_ID = "local-dev"
 
-# JWKS cache
-_jwks_cache = {"keys": None, "expires": 0}
+# JWKS cache keyed by issuer domain. Because Auth0 can issue tokens with
+# either the custom domain or the original tenant as `iss`, we must fetch
+# signing keys from the same domain that signed the token.
+_jwks_cache: dict[str, dict] = {}
 _JWKS_CACHE_TTL = 3600  # 1 hour
 
 # auto_error=False so requests without an Authorization header don't 403 when
@@ -60,42 +62,53 @@ _JWKS_CACHE_TTL = 3600  # 1 hour
 security = HTTPBearer(auto_error=AUTH_DISABLED is False)
 
 
-def _get_jwks() -> list[dict]:
-    """Fetch Auth0 JWKS (JSON Web Key Set) with caching."""
+def _normalize_issuer_domain(issuer: str) -> str:
+    """Strip scheme and trailing path to leave a bare domain."""
+    domain = issuer
+    if domain.startswith("https://"):
+        domain = domain[8:]
+    elif domain.startswith("http://"):
+        domain = domain[7:]
+    return domain.rstrip("/")
+
+
+def _get_jwks(issuer_domain: str) -> list[dict]:
+    """Fetch Auth0 JWKS (JSON Web Key Set) for a specific issuer domain, with caching."""
     global _jwks_cache
 
     now = time.time()
-    if _jwks_cache["keys"] and now < _jwks_cache["expires"]:
-        return _jwks_cache["keys"]
+    cached = _jwks_cache.get(issuer_domain)
+    if cached and cached["keys"] and now < cached["expires"]:
+        return cached["keys"]
 
-    if not AUTH0_DOMAIN:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="AUTH0_DOMAIN environment variable not set",
-        )
-
-    jwks_url = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
+    jwks_url = f"https://{issuer_domain}/.well-known/jwks.json"
     try:
         response = httpx.get(jwks_url, timeout=10.0)
         response.raise_for_status()
         jwks_data = response.json()
-        _jwks_cache["keys"] = jwks_data.get("keys", [])
-        _jwks_cache["expires"] = now + _JWKS_CACHE_TTL
-        return _jwks_cache["keys"]
+        _jwks_cache[issuer_domain] = {
+            "keys": jwks_data.get("keys", []),
+            "expires": now + _JWKS_CACHE_TTL,
+        }
+        return _jwks_cache[issuer_domain]["keys"]
     except httpx.HTTPError as e:
-        logger.error(f"Failed to fetch JWKS from Auth0: {e}")
+        logger.error(f"Failed to fetch JWKS from {issuer_domain}: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to verify authentication credentials",
         )
 
 
-def _get_rsa_key(kid: str) -> dict:
+def _get_rsa_key(kid: str, issuer_domain: str) -> dict:
     """Find the RSA public key matching the key ID in the JWT header."""
-    keys = _get_jwks()
+    keys = _get_jwks(issuer_domain)
     for key in keys:
         if key.get("kid") == kid:
             return key
+    logger.warning(
+        f"No matching signing key (kid={kid}) from {issuer_domain} "
+        f"(accepted issuers: {AUTH0_ISSUERS})"
+    )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Unable to find matching signing key",
@@ -104,17 +117,12 @@ def _get_rsa_key(kid: str) -> dict:
 
 def verify_jwt(token: str) -> dict:
     """
-    Validate a JWT token against Auth0's JWKS endpoint.
+    Validate a JWT token against the Auth0 JWKS endpoint of the token's issuer.
 
     Hardcodes algorithms=["RS256"] to prevent algorithm confusion attacks.
-    Validates signature, issuer, audience, and expiry.
+    Validates signature, issuer, audience, and expiry. Supports tokens issued
+    by either a custom Auth0 domain or the original tenant domain.
     """
-    if not AUTH0_DOMAIN:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="AUTH0_DOMAIN environment variable not set",
-        )
-
     # Decode header without verification to get the key ID
     try:
         unverified_header = jwt.get_unverified_header(token)
@@ -131,8 +139,27 @@ def verify_jwt(token: str) -> dict:
             detail="Token missing key ID",
         )
 
-    # Get the matching RSA key from Auth0
-    rsa_key = _get_rsa_key(kid)
+    # Decode payload without verification to discover the issuer. We validate
+    # the issuer claim after signature verification, but we need it now to know
+    # which JWKS endpoint to query for the correct signing key.
+    try:
+        unverified_payload = jwt.decode(token, options={"verify_signature": False})
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format",
+        )
+
+    token_issuer = unverified_payload.get("iss", "")
+    issuer_domain = _normalize_issuer_domain(token_issuer)
+    if not issuer_domain:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing issuer claim",
+        )
+
+    # Get the matching RSA key from the issuer that signed the token
+    rsa_key = _get_rsa_key(kid, issuer_domain)
 
     # Build the public key from JWKS
     from jwt.algorithms import RSAAlgorithm
