@@ -1815,17 +1815,40 @@ The AI will automatically extract:
                 throw new Error('Session expired. Please sign in again.');
             }
 
+            // Decode JWT payload (no signature verification) for diagnostic
+            // logging — this is safe to do client-side; the backend still
+            // validates the signature.
+            function decodeJwtPayload(jwt) {
+                try {
+                    const parts = jwt.split('.');
+                    if (parts.length !== 3) return null;
+                    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                    const padded = payload + '='.repeat((4 - payload.length % 4) % 4);
+                    return JSON.parse(atob(padded));
+                } catch (err) { return null; }
+            }
+
             let token = null;
             if (auth0Client) {
                 try {
                     token = await auth0Client.getTokenSilently();
+                    // Diagnostic: log token claims (no signature) so Safari
+                    // auth issues can be debugged via the console without
+                    // needing a token inspector.
+                    const claims = decodeJwtPayload(token);
+                    if (claims) {
+                        const expIn = Math.round((claims.exp - Date.now() / 1000));
+                        console.log(
+                            '[apiFetch] token claims:',
+                            'iss=' + claims.iss,
+                            'aud=' + (Array.isArray(claims.aud) ? claims.aud.join(',') : claims.aud),
+                            'sub=' + (claims.sub || '?'),
+                            'expires in ' + expIn + 's',
+                            'scope=' + (claims.scope || '?')
+                        );
+                    }
                 } catch (tokenErr) {
                     console.warn('[apiFetch] getTokenSilently failed on first attempt:', tokenErr);
-                    // Don't auto-logout here — surface the error and let the
-                    // user decide. This used to call logout() which redirected
-                    // to Auth0 and started an infinite cycle in Safari when the
-                    // underlying issue was something recoverable (e.g., a single
-                    // bad refresh, not a true session loss).
                     showSessionExpiredOverlay('Could not get a fresh session token. Please sign in again.');
                     throw new Error('Session expired. Please sign in again.');
                 }
@@ -1838,15 +1861,27 @@ The AI will automatically extract:
             const response = await fetch(url, options);
 
             // Handle 401 — try once more with a fresh token. If still 401,
-            // show the session-expired overlay rather than auto-logging out
-            // and triggering the cycle.
+            // surface the actual backend error message in the console so we
+            // can tell *why* the token is being rejected (expired, wrong
+            // audience, wrong issuer, unknown kid, etc.).
             if (response.status === 401 && auth0Client) {
+                // Log the backend's actual error message so we can diagnose
+                // why tokens are being rejected.
+                try {
+                    const errBody = await response.clone().json().catch(() => null);
+                    console.warn('[apiFetch] 401 from', url, '— backend said:', errBody?.detail || '(no detail)');
+                } catch (readErr) { /* ignore */ }
                 try {
                     const newToken = await auth0Client.getTokenSilently();
                     options.headers['Authorization'] = `Bearer ${newToken}`;
                     const retryResponse = await fetch(url, options);
                     if (retryResponse.status === 401) {
-                        console.warn('[apiFetch] Got 401 even after refreshing token — session is unrecoverable');
+                        let errDetail = 'session is unrecoverable';
+                        try {
+                            const errBody = await retryResponse.clone().json().catch(() => null);
+                            errDetail = 'backend said: ' + (errBody?.detail || '(no detail)');
+                        } catch (readErr) { /* ignore */ }
+                        console.warn('[apiFetch] Got 401 even after refreshing token —', errDetail);
                         showSessionExpiredOverlay('Your session ended. Please sign in again to continue.');
                         throw new Error('Session expired. Please sign in again.');
                     }
