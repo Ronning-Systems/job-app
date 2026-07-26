@@ -782,6 +782,9 @@
                 <button class="btn btn-secondary" id="btn-cover-letter-settings" title="Cover Letter Examples">
                     <i class="fas fa-envelope"></i> Cover Letters
                 </button>
+                <button class="btn btn-secondary" id="btn-cover-letter-editor" title="Create/View Cover Letter" style="display: none;">
+                    <i class="fas fa-envelope-open-text"></i> <span id="cover-letter-editor-btn-label">Create Cover Letter</span>
+                </button>
                 <button class="btn btn-secondary" id="btn-notifications" title="Notifications" style="position: relative;">
                     <i class="fas fa-bell"></i>
                     <span id="notification-badge" style="display: none; position: absolute; top: -6px; right: -6px; background: var(--danger); color: white; border-radius: 10px; padding: 1px 6px; font-size: 0.7rem; font-weight: 600;">0</span>
@@ -1162,6 +1165,52 @@ The AI will automatically extract:
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="btn-close-resume-viewer-footer">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cover Letter Editor Modal -->
+    <div class="modal-overlay" id="cover-letter-editor-modal" style="z-index: 2000;">
+        <div class="modal" style="max-width: 900px; width: 100%; height: 90vh; max-height: 95vh; display: flex; flex-direction: column; margin: 10px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-envelope"></i> Cover Letter</h2>
+                <button class="btn-close" id="btn-close-cover-letter-editor">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; padding: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+                <div style="padding: 12px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px;">
+                        <span style="font-weight: 500; color: var(--gray-700);">Job:</span>
+                        <span id="cover-letter-editor-job-title" style="color: var(--primary); font-weight: 600;"></span>
+                        <span style="color: var(--gray-400);">|</span>
+                        <span id="cover-letter-editor-company" style="color: var(--gray-600);"></span>
+                        <span style="color: var(--gray-400);">|</span>
+                        <span id="cover-letter-editor-public-job-id" style="color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 2px 6px; background: var(--gray-100); border-radius: 4px; display: none;" title="Globally unique Job ID"></span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <span style="font-size: 0.85rem; color: var(--gray-600);"><i class="fas fa-microchip"></i> Model:</span>
+                        <select id="cover-letter-model-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
+                            <!-- Populated dynamically by openCoverLetterEditor() -->
+                        </select>
+                        <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-history"></i> Version:</span>
+                        <select id="cover-letter-version-select" style="font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
+                            <option value="">Latest</option>
+                        </select>
+                    </div>
+                </div>
+                <textarea id="cover-letter-editor-content" style="flex: 1; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch; background: white;"></textarea>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                <button class="btn btn-secondary" id="btn-close-cover-letter-editor-footer">Close</button>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" id="btn-regenerate-cover-letter">
+                        <i class="fas fa-sync-alt"></i> Regenerate
+                    </button>
+                    <span style="font-size: 0.85rem; color: var(--gray-600); margin-left: 12px;"><i class="fas fa-comment"></i> Feedback:</span>
+                    <textarea id="cover-letter-editor-feedback" rows="1" placeholder="e.g. Make it more concise; emphasize cloud architecture." style="flex: 1; min-width: 200px; padding: 6px 8px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 0.85rem;"></textarea>
+                    <button class="btn btn-primary" id="btn-revise-cover-letter">
+                        <i class="fas fa-pen-to-square"></i> Revise with Feedback
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2126,6 +2175,7 @@ The AI will automatically extract:
 
             const isArchived = ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(fullJob.stage);
             document.getElementById('btn-archive-toggle').textContent = isArchived ? 'Unarchive' : 'Archive';
+            updateCoverLetterButton(fullJob);
             detailModal.classList.add('active');
         }
 
@@ -2481,6 +2531,28 @@ The AI will automatically extract:
                     switchResumeEditorTab('plain', true);
                 }
             }
+        });
+
+        // Cover letter version selector — load selected version into editor
+        document.getElementById('cover-letter-version-select').addEventListener('change', async (e) => {
+            const jobId = currentCoverLetterJobId;
+            if (!jobId) return;
+            const version = parseInt(e.target.value);
+            if (!version) return; // "Latest" selected
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
+                if (!r.ok) return;
+                const data = await r.json();
+                const rev = (data.revisions || []).find(rr => rr.version === version);
+                if (rev) {
+                    document.getElementById('cover-letter-editor-content').value = rev.content || '';
+                }
+            } catch (err) { console.error(err); }
+        });
+
+        // Persist cover letter model selection across sessions
+        document.getElementById('cover-letter-model-select').addEventListener('change', (e) => {
+            localStorage.setItem('joblign_cover_letter_model', e.target.value);
         });
 
         // File upload zones
@@ -3805,6 +3877,115 @@ The AI will automatically extract:
             return d.innerHTML;
         }
 
+        // ─── Cover Letter Editor Modal ───
+        const coverLetterEditorModal = document.getElementById('cover-letter-editor-modal');
+        let currentCoverLetterJobId = null;
+
+        document.getElementById('btn-cover-letter-editor').addEventListener('click', () => {
+            if (currentCoverLetterJobId) openCoverLetterEditor(currentCoverLetterJobId);
+        });
+        document.getElementById('btn-close-cover-letter-editor').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));
+        document.getElementById('btn-close-cover-letter-editor-footer').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));
+        document.getElementById('btn-regenerate-cover-letter').addEventListener('click', () => {
+            if (currentCoverLetterJobId) generateCoverLetter(currentCoverLetterJobId);
+        });
+        document.getElementById('btn-revise-cover-letter').addEventListener('click', () => {
+            if (currentCoverLetterJobId) reviseCoverLetter(currentCoverLetterJobId);
+        });
+        coverLetterEditorModal.addEventListener('click', (e) => {
+            if (e.target === coverLetterEditorModal) coverLetterEditorModal.classList.remove('active');
+        });
+
+        async function openCoverLetterEditor(jobId) {
+            currentCoverLetterJobId = jobId;
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            document.getElementById('cover-letter-editor-job-title').textContent = job.position || 'Unknown Position';
+            document.getElementById('cover-letter-editor-company').textContent = job.company || '';
+
+            const publicJobIdEl = document.getElementById('cover-letter-editor-public-job-id');
+            if (job.public_job_id) {
+                publicJobIdEl.textContent = job.public_job_id;
+                publicJobIdEl.style.display = 'inline';
+            } else {
+                publicJobIdEl.style.display = 'none';
+            }
+
+            // Populate model selector (same options as resume)
+            const modelSelect = document.getElementById('cover-letter-model-select');
+            const currentModel = localStorage.getItem('joblign_cover_letter_model') || DEFAULT_MODEL;
+            modelSelect.innerHTML = AVAILABLE_MODELS.map(m =>
+                `<option value="${m.value}" ${m.value === currentModel ? 'selected' : ''}>${m.label}</option>`
+            ).join('');
+
+            // Populate version selector from revisions
+            const versionSelect = document.getElementById('cover-letter-version-select');
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
+                if (r.ok) {
+                    const data = await r.json();
+                    const revisions = (data.revisions || []).sort((a, b) => (b.version || 0) - (a.version || 0));
+                    if (revisions.length > 1) {
+                        versionSelect.innerHTML = '<option value="">Latest</option>' +
+                            revisions.map(r => `<option value="${r.version}">Version ${r.version}</option>`).join('');
+                        versionSelect.style.display = 'inline-block';
+                    } else {
+                        versionSelect.innerHTML = '';
+                        versionSelect.style.display = 'none';
+                    }
+                } else {
+                    versionSelect.innerHTML = '';
+                    versionSelect.style.display = 'none';
+                }
+            } catch (err) {
+                versionSelect.innerHTML = '';
+                versionSelect.style.display = 'none';
+            }
+
+            // Load latest cover letter content
+            const textarea = document.getElementById('cover-letter-editor-content');
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/generate-cover-letter/status`);
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data.status === 'completed' && data.cover_letter) {
+                        textarea.value = data.cover_letter;
+                    } else if (data.status === 'processing') {
+                        textarea.value = '(Generating cover letter...)';
+                    } else {
+                        textarea.value = 'No cover letter generated yet.';
+                    }
+                } else {
+                    textarea.value = 'No cover letter generated yet.';
+                }
+            } catch (err) {
+                textarea.value = 'No cover letter generated yet.';
+            }
+
+            // Clear feedback field
+            document.getElementById('cover-letter-editor-feedback').value = '';
+
+            coverLetterEditorModal.classList.add('active');
+        }
+
+        function updateCoverLetterButton(job) {
+            const btn = document.getElementById('btn-cover-letter-editor');
+            const label = document.getElementById('cover-letter-editor-btn-label');
+            if (!btn) return;
+            // Only show the button when a job is selected (currentJobId is set)
+            if (!currentJobId || !job) {
+                btn.style.display = 'none';
+                return;
+            }
+            btn.style.display = 'inline-flex';
+            if (job.has_cover_letter) {
+                label.textContent = 'View Cover Letter';
+            } else {
+                label.textContent = 'Create Cover Letter';
+            }
+        }
+
         // ─── Artifact tab switching (detail modal) ───
         document.addEventListener('click', (e) => {
             const tab = e.target.closest('.artifact-tab');
@@ -3836,7 +4017,11 @@ The AI will automatically extract:
 
         async function pollCoverLetterStatus(jobId) {
             const panel = document.getElementById('cover-letter-content');
-            panel.innerHTML = '<em style="color:var(--gray-500)">Generating cover letter...</em>';
+            if (panel) panel.innerHTML = '<em style="color:var(--gray-500)">Generating cover letter...</em>';
+            const editorContent = document.getElementById('cover-letter-editor-content');
+            if (editorContent && currentCoverLetterJobId === jobId) {
+                editorContent.value = '(Generating cover letter...)';
+            }
             const max = 120, delay = 2000;
             for (let i = 0; i < max; i++) {
                 await new Promise(res => setTimeout(res, delay));
@@ -3845,30 +4030,79 @@ The AI will automatically extract:
                     if (!r.ok) continue;
                     const data = await r.json();
                     if (data.status === 'completed') {
-                        panel.textContent = data.cover_letter || '';
-                        document.getElementById('cover-letter-revisions').textContent = (data.revisions || []).length + ' revision(s)';
+                        if (panel) panel.textContent = data.cover_letter || '';
+                        const revisionsEl = document.getElementById('cover-letter-revisions');
+                        if (revisionsEl) revisionsEl.textContent = (data.revisions || []).length + ' revision(s)';
+                        if (editorContent && currentCoverLetterJobId === jobId) {
+                            editorContent.value = data.cover_letter || '';
+                        }
+                        // Refresh the local job state so updateCoverLetterButton reflects the new state
+                        const jobIdx = jobs.findIndex(j => j.id === jobId);
+                        if (jobIdx !== -1) {
+                            jobs[jobIdx].has_cover_letter = true;
+                            jobs[jobIdx].cover_letter = data.cover_letter || '';
+                            jobs[jobIdx].cover_letter_revisions = data.revisions || [];
+                            updateCoverLetterButton(jobs[jobIdx]);
+                            renderJobs();
+                        }
+                        await fetchJobs();
                         addNotification({ id: 'cl-' + jobId, jobId, company: '', position: '', version: data.version, model: '', timestamp: new Date().toISOString(), title: 'Cover letter ready' });
                         return;
                     }
-                    if (data.status === 'error') { panel.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(data.error || '') + '</em>'; return; }
+                    if (data.status === 'error') {
+                        if (panel) panel.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(data.error || '') + '</em>';
+                        return;
+                    }
                 } catch (err) { /* keep polling */ }
             }
-            panel.innerHTML = '<em style="color:var(--gray-500)">Timed out waiting for generation.</em>';
+            if (panel) panel.innerHTML = '<em style="color:var(--gray-500)">Timed out waiting for generation.</em>';
         }
 
         async function reviseCoverLetter(jobId) {
-            const feedback = document.getElementById('cover-letter-feedback-input').value.trim();
+            // Use the editor modal's feedback textarea if it's open, otherwise fall back to the detail panel
+            let feedbackEl = document.getElementById('cover-letter-editor-feedback');
+            let contentEl = document.getElementById('cover-letter-editor-content');
+            let revisionsEl = null;
+            let isEditorMode = !!feedbackEl && document.getElementById('cover-letter-editor-modal').classList.contains('active');
+
+            if (!isEditorMode) {
+                feedbackEl = document.getElementById('cover-letter-feedback-input');
+                contentEl = document.getElementById('cover-letter-content');
+                revisionsEl = document.getElementById('cover-letter-revisions');
+            }
+
+            const feedback = feedbackEl ? feedbackEl.value.trim() : '';
             if (!feedback) { alert('Enter feedback for the agent first.'); return; }
+
+            const modelSelect = document.getElementById('cover-letter-model-select');
+            const model = modelSelect ? modelSelect.value : null;
+
             try {
                 const r = await apiFetch(`${API_URL}/jobs/${jobId}/revise-cover-letter`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ feedback })
+                    body: JSON.stringify({ feedback, model })
                 });
                 if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Revision failed'); }
                 const data = await r.json();
-                document.getElementById('cover-letter-content').textContent = data.cover_letter || '';
-                document.getElementById('cover-letter-revisions').textContent = (data.revisions || []).length + ' revision(s)';
-                document.getElementById('cover-letter-feedback-input').value = '';
+                const coverLetterContent = data.cover_letter || '';
+                if (contentEl) {
+                    if (contentEl.tagName === 'TEXTAREA' || contentEl.tagName === 'INPUT') {
+                        contentEl.value = coverLetterContent;
+                    } else {
+                        contentEl.textContent = coverLetterContent;
+                    }
+                }
+                if (revisionsEl) revisionsEl.textContent = (data.revisions || []).length + ' revision(s)';
+                if (feedbackEl) feedbackEl.value = '';
+
+                // Refresh local state
+                const jobIdx = jobs.findIndex(j => j.id === jobId);
+                if (jobIdx !== -1) {
+                    jobs[jobIdx].has_cover_letter = true;
+                    jobs[jobIdx].cover_letter = data.cover_letter || '';
+                    jobs[jobIdx].cover_letter_revisions = data.revisions || [];
+                    renderJobs();
+                }
             } catch (err) { alert('Error: ' + err.message); }
         }
 
@@ -3876,6 +4110,15 @@ The AI will automatically extract:
             if (!confirm('Delete the generated cover letter?')) return;
             try {
                 await apiFetch(`${API_URL}/jobs/${jobId}/cover-letter`, { method: 'DELETE' });
+                // Refresh local state
+                const jobIdx = jobs.findIndex(j => j.id === jobId);
+                if (jobIdx !== -1) {
+                    jobs[jobIdx].has_cover_letter = false;
+                    jobs[jobIdx].cover_letter = null;
+                    jobs[jobIdx].cover_letter_revisions = [];
+                    updateCoverLetterButton(jobs[jobIdx]);
+                    renderJobs();
+                }
                 await showDetail(jobId);
                 await fetchJobs();
             } catch (err) { alert('Error: ' + err.message); }
