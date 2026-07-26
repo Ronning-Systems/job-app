@@ -1748,11 +1748,27 @@ The AI will automatically extract:
 
         // ─── Auth Actions ───
         async function login() {
+            if (!window.auth0) {
+                console.error('Auth0 SDK not loaded');
+                alert('Unable to reach the login service. Please check your connection and try again.');
+                return;
+            }
+            if (!auth0Client) {
+                try {
+                    await initAuth();
+                } catch (err) {
+                    console.error('Auth0 re-init failed:', err);
+                    alert('Unable to reach the login service. Please check your connection and try again.');
+                    return;
+                }
+            }
             if (auth0Client) {
                 // Pass scope so the authorize call requests offline_access for
                 // refresh tokens (must match the createAuth0Client authorizationParams).
+                // Explicit redirect_uri is required for Safari ITP compatibility.
                 await auth0Client.loginWithRedirect({
                     authorizationParams: {
+                        redirect_uri: AUTH0_REDIRECT_URI,
                         scope: 'openid profile email offline_access',
                     },
                 });
