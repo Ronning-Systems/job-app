@@ -1830,6 +1830,7 @@ The AI will automatically extract:
             const statusClass = statusClasses[job.stage] || 'status-applied';
             const isArchived = ['rejected', 'withdrawn', 'closed'].includes(job.stage);
             const hasGeneratedResume = job.generated_resume && (typeof job.generated_resume === 'string' ? job.generated_resume.trim() : (job.generated_resume.content && job.generated_resume.content.trim()));
+            const hasCoverLetter = job.has_cover_letter;
             const publicJobId = job.public_job_id || '';
             console.log('Rendering job:', job.id, 'generated_resume:', hasGeneratedResume, job.generated_resume ? 'exists' : 'null');
             return `
@@ -1854,6 +1855,15 @@ The AI will automatically extract:
                         ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateResume(${job.id})" title="Generate Resume">
                                 <i class="fas fa-magic"></i> Generate Resume
+                            </button>
+                        `}
+                        ${hasCoverLetter ? `
+                            <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="View/Edit Cover Letter">
+                                <i class="fas fa-envelope-open-text"></i> View Cover Letter
+                            </button>
+                        ` : `
+                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="Create Cover Letter">
+                                <i class="fas fa-magic"></i> Create Cover Letter
                             </button>
                         `}
                         <select class="job-stage-select" data-job-id="${job.id}" style="font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); cursor: pointer;"
@@ -3896,7 +3906,7 @@ The AI will automatically extract:
             if (e.target === coverLetterEditorModal) coverLetterEditorModal.classList.remove('active');
         });
 
-        async function openCoverLetterEditor(jobId) {
+        window.openCoverLetterEditor = async function(jobId) {
             currentCoverLetterJobId = jobId;
             const job = jobs.find(j => j.id === jobId);
             if (!job) return;
