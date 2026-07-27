@@ -1632,12 +1632,6 @@ The AI will automatically extract:
         let auth0Client = null;
         let currentUser = null;
 
-        // Tracks a session-expired state so we can show the user a clear
-        // message instead of silently cycling through logout -> re-login ->
-        // 401 -> logout. Set to true the first time we hit an unrecoverable
-        // auth error so we don't keep retrying on every subsequent API call.
-        let sessionExpired = false;
-
         // ─── Auth0 SDK Initialization ───
         // Checks /api/health; if the backend reports auth_disabled=true, skip
         // Auth0 entirely and load the app as a local-dev user. Otherwise the
@@ -1693,23 +1687,13 @@ The AI will automatically extract:
                 auth0Client = await Promise.race([initPromise, timeoutPromise]);
                 clearTimeout(initTimer);
 
-                // Reset the session-expired flag BEFORE handling any callbacks.
-                // This prevents false "session expired" errors during initial auth.
-                sessionExpired = false;
-                const staleOverlay = document.getElementById('session-expired-overlay');
-                if (staleOverlay) staleOverlay.remove();
-
                 // Check if we're returning from Auth0 redirect
                 const query = window.location.search;
                 if (query.includes('code=') && query.includes('state=')) {
                     console.log('[initAuth] Handling Auth0 redirect callback...');
                     await auth0Client.handleRedirectCallback();
                     window.history.replaceState({}, document.title, '/');
-                    // Wait a moment for tokens to be cached before checking auth state.
-                    // This prevents a race condition where getTokenSilently() fails
-                    // because the tokens from handleRedirectCallback() aren't cached yet.
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    console.log('[initAuth] Callback handled, tokens cached');
+                    console.log('[initAuth] Callback handled');
                 }
 
                 // Check if authenticated
@@ -1795,47 +1779,7 @@ The AI will automatically extract:
 
         // ─── Authenticated Fetch Wrapper ───
 
-        // Show a non-redirecting "session expired" overlay with a button to
-        // manually re-login. Avoids the previous infinite-redirect loop where
-        // every failed API call triggered logout() -> Auth0 -> back -> 401 -> logout.
-        function showSessionExpiredOverlay(reason) {
-            if (sessionExpired) return; // already shown — don't pile on
-            sessionExpired = true;
-            const overlay = document.createElement('div');
-            overlay.id = 'session-expired-overlay';
-            overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:99999; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-            overlay.innerHTML = `
-                <div style="background:white; border-radius:16px; padding:40px 48px; max-width:440px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                    <div style="font-size:2.5rem; margin-bottom:8px;">🔒</div>
-                    <h2 style="margin:0 0 8px; font-size:1.4rem; color:#111827;">Session expired</h2>
-                    <p style="margin:0 0 24px; color:#6b7280; font-size:0.95rem;">${escapeHtml(reason || 'Your session ended. Please sign in again to continue.')}</p>
-                    <button id="btn-session-expired-signin" style="background:#4f46e5; color:white; border:none; padding:12px 28px; border-radius:8px; font-size:1rem; font-weight:600; cursor:pointer;">Sign in again</button>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            document.getElementById('btn-session-expired-signin').addEventListener('click', () => {
-                overlay.remove();
-                sessionExpired = false;
-                // Clear local session state so the SDK doesn't keep trying
-                // to use a stale refresh token. Don't call auth0Client.logout()
-                // because that itself redirects to Auth0 — just nuke localStorage
-                // entries the SDK uses for token caching.
-                try {
-                    for (const k of Object.keys(localStorage)) {
-                        if (k.startsWith('@@auth0spajs_')) localStorage.removeItem(k);
-                    }
-                } catch (err) { console.warn('Failed to clear Auth0 localStorage:', err); }
-                if (typeof login === 'function') login();
-            });
-        }
-
         async function apiFetch(url, options = {}) {
-            // If the session has been marked expired, just bail. The overlay
-            // is showing — don't pile on more API calls that will all 401.
-            if (sessionExpired) {
-                throw new Error('Session expired. Please sign in again.');
-            }
-
             // Decode JWT payload (no signature verification) for diagnostic
             // logging — this is safe to do client-side; the backend still
             // validates the signature.
@@ -1870,24 +1814,22 @@ The AI will automatically extract:
                     }
                 } catch (tokenErr) {
                     console.warn('[apiFetch] getTokenSilently failed:', tokenErr);
-                    // Don't immediately show session expired overlay — this could
-                    // be a race condition right after login. Try the API call anyway
-                    // and let the 401 handler deal with it if needed.
+                    // Token refresh failed — trigger re-authentication.
+                    // This handles Safari ITP blocking the refresh iframe.
+                    console.log('[apiFetch] Triggering re-auth due to token refresh failure');
+                    login();
+                    throw new Error('Session expired, redirecting to login...');
                 }
-                if (token) {
-                    options.headers = {
-                        ...options.headers,
-                        'Authorization': `Bearer ${token}`,
-                    };
-                }
+                options.headers = {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`,
+                };
             }
 
             const response = await fetch(url, options);
 
             // Handle 401 — try once more with a fresh token. If still 401,
-            // surface the actual backend error message in the console so we
-            // can tell *why* the token is being rejected (expired, wrong
-            // audience, wrong issuer, unknown kid, etc.).
+            // redirect to login (Auth0 will handle re-authentication).
             if (response.status === 401 && auth0Client) {
                 // Log the backend's actual error message so we can diagnose
                 // why tokens are being rejected.
@@ -1906,14 +1848,16 @@ The AI will automatically extract:
                             errDetail = 'backend said: ' + (errBody?.detail || '(no detail)');
                         } catch (readErr) { /* ignore */ }
                         console.warn('[apiFetch] Got 401 even after refreshing token —', errDetail);
-                        showSessionExpiredOverlay('Your session ended. Please sign in again to continue.');
-                        throw new Error('Session expired. Please sign in again.');
+                        // Token is genuinely expired — redirect to login
+                        login();
+                        throw new Error('Session expired, redirecting to login...');
                     }
                     return retryResponse;
                 } catch (refreshErr) {
                     console.error('[apiFetch] Token refresh failed:', refreshErr);
-                    showSessionExpiredOverlay('Could not refresh your session. Please sign in again.');
-                    throw new Error('Session expired. Please sign in again.');
+                    // Can't refresh — redirect to login
+                    login();
+                    throw new Error('Session expired, redirecting to login...');
                 }
             }
 
