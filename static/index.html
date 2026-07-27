@@ -1693,19 +1693,24 @@ The AI will automatically extract:
                 auth0Client = await Promise.race([initPromise, timeoutPromise]);
                 clearTimeout(initTimer);
 
-                // Check if we're returning from Auth0 redirect
-                const query = window.location.search;
-                if (query.includes('code=') && query.includes('state=')) {
-                    await auth0Client.handleRedirectCallback();
-                    window.history.replaceState({}, document.title, '/');
-                }
-
-                // Reset the session-expired flag on a fresh auth attempt.
-                // Also tear down any stale session-expired overlay so the user
-                // isn't left looking at the lock screen after signing in.
+                // Reset the session-expired flag BEFORE handling any callbacks.
+                // This prevents false "session expired" errors during initial auth.
                 sessionExpired = false;
                 const staleOverlay = document.getElementById('session-expired-overlay');
                 if (staleOverlay) staleOverlay.remove();
+
+                // Check if we're returning from Auth0 redirect
+                const query = window.location.search;
+                if (query.includes('code=') && query.includes('state=')) {
+                    console.log('[initAuth] Handling Auth0 redirect callback...');
+                    await auth0Client.handleRedirectCallback();
+                    window.history.replaceState({}, document.title, '/');
+                    // Wait a moment for tokens to be cached before checking auth state.
+                    // This prevents a race condition where getTokenSilently() fails
+                    // because the tokens from handleRedirectCallback() aren't cached yet.
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    console.log('[initAuth] Callback handled, tokens cached');
+                }
 
                 // Check if authenticated
                 const isAuthenticated = await auth0Client.isAuthenticated();
@@ -1864,14 +1869,17 @@ The AI will automatically extract:
                         );
                     }
                 } catch (tokenErr) {
-                    console.warn('[apiFetch] getTokenSilently failed on first attempt:', tokenErr);
-                    showSessionExpiredOverlay('Could not get a fresh session token. Please sign in again.');
-                    throw new Error('Session expired. Please sign in again.');
+                    console.warn('[apiFetch] getTokenSilently failed:', tokenErr);
+                    // Don't immediately show session expired overlay — this could
+                    // be a race condition right after login. Try the API call anyway
+                    // and let the 401 handler deal with it if needed.
                 }
-                options.headers = {
-                    ...options.headers,
-                    'Authorization': `Bearer ${token}`,
-                };
+                if (token) {
+                    options.headers = {
+                        ...options.headers,
+                        'Authorization': `Bearer ${token}`,
+                    };
+                }
             }
 
             const response = await fetch(url, options);
