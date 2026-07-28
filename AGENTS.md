@@ -144,9 +144,14 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
 - **Build:** the my-stack deploy script rsyncs each subdir to
   patrick-mini and runs `docker buildx build` in it. Image names
   are `jobapp-<name>:${IMAGE_TAG}`.
-- **Runtime:** declared in this repo's `docker-compose.yml` as
-  services on the external `proxy` network. The my-stack deploy
-  script brings them up as part of the `jobapp` compose project.
+- **Runtime:** declared in this repo's `docker-compose.yml`
+  (prod) and `docker-compose.test.yml` (test) as services on
+  the external `proxy` network. The my-stack deploy script
+  brings them up as part of the `jobapp` (prod) or `jobapp-test`
+  (test) compose project. The test compose uses `-test`
+  suffixes on every service + container_name so prod and test
+  can run in parallel on the same `proxy` network without DNS
+  collisions.
 - **Auth:** fetcher has no auth (callable only from the internal
   proxy network). Auto-apply uses HMAC-SHA256; the secret is
   materialized by the my-stack deploy script and mounted as a
