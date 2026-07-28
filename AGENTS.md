@@ -123,10 +123,10 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   fetcher sidecar (Playwright+chromium) for blocked boards (LinkedIn,
   Indeed).
 - **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
-  headless-browser sidecar. The sidecar itself is owned by `my-stack`
-  (`portainer/stacks/fetcher.yml`), not this repo — this repo just calls
-  it. Internal-only; not exposed by Traefik. The 4-stack deploy became 5
-  (network → traefik → fetcher → vault → jobapp).
+  headless-browser sidecar. The sidecar itself lives in this repo
+  (`sidecars/fetcher/`); the my-stack deploy script builds and brings
+  it up but doesn't define its behavior. Internal-only; not exposed
+  by Traefik.
 - **Parser extensions** in `backend/job_parser.py`:
   `_extract_pay_range`, `_extract_application_deadline`, improved
   `_extract_credentials`. Structured pay range (`pay_range_min/max`,
@@ -134,3 +134,37 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   the `Job` and are sortable; no deadline reminders/badges in v1.
 - **Sort-by-attribute:** `GET /api/jobs?sort=company|position|location|
   stage|applied_date|deadline|pay|created&order=asc|desc`.
+
+## Sidecars (added 2026-07-28)
+
+- **Layout:** `sidecars/{fetcher,autoapply}/` — each is a
+  self-contained subproject with Dockerfile, source, and (where
+  applicable) tests. See `sidecars/README.md` for the build
+  contract.
+- **Build:** the my-stack deploy script rsyncs each subdir to
+  patrick-mini and runs `docker buildx build` in it. Image names
+  are `jobapp-<name>:${IMAGE_TAG}`.
+- **Runtime:** declared in this repo's `docker-compose.yml` as
+  services on the external `proxy` network. The my-stack deploy
+  script brings them up as part of the `jobapp` compose project.
+- **Auth:** fetcher has no auth (callable only from the internal
+  proxy network). Auto-apply uses HMAC-SHA256; the secret is
+  materialized by the my-stack deploy script and mounted as a
+  Docker secret into both the sidecar and the api container.
+- **Health:** every sidecar exposes `GET /healthz` (unauth).
+  `GET /api/health/system` on the api service probes every
+  sidecar + postgres + ollama and returns one 200/503 the
+  deploy script polls. Adding a new sidecar = add a Dockerfile +
+  service in compose + probe in `backend/health.py`.
+
+## Health rollup endpoint
+
+`GET /api/health/system` (added 2026-07-28) runs every registered
+probe concurrently and returns 200 with `{"overall":"ok", ...}` if
+all components are healthy, or 503 with `{"overall":"degraded", ...}`
+if any are down. The shallow `GET /api/health` endpoint stays for
+backward compat with the Traefik healthcheck.
+
+Probes live in `backend/health.py` and are registered in the
+`PROBES` dict there. Each probe returns `(status, detail)`. Adding
+a new sidecar = add `_probe_<name>` + an entry in `PROBES`.
