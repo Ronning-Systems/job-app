@@ -323,8 +323,13 @@ def _run_alembic_upgrade():
     If the DB has tables but no alembic_version table, it predates Alembic
     (the existing production DB). Stamp it at the baseline revision so we
     don't try to recreate existing tables, then upgrade to head.
+
+    Schema changes (incl. billing columns, subscription/usage_event tables,
+    grandfather backfill) live in Alembic revisions under
+    `backend/alembic/versions/`. Do not hand-write ALTER TABLE here —
+    see AGENTS.md "Never hand-write ALTER TABLE".
     """
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect
 
     inspector = inspect(engine)
     tables = inspector.get_table_names()
@@ -364,68 +369,6 @@ def _run_alembic_upgrade():
         cfg.set_main_option("sqlalchemy.url", str(engine.url))
         command.upgrade(cfg, "head")
         logger.info("Migrations applied")
-
-    # Check users table for billing columns
-    if 'users' in inspector.get_table_names():
-        existing_cols = [c['name'] for c in inspector.get_columns('users')]
-        with eng.connect() as conn:
-            if 'plan' not in existing_cols:
-                logger.info("Migrating: adding 'plan' column to users")
-                conn.execute(text("ALTER TABLE users ADD COLUMN plan VARCHAR(32) DEFAULT 'free' NOT NULL"))
-                conn.commit()
-            if 'plan_grandfathered' not in existing_cols:
-                logger.info("Migrating: adding 'plan_grandfathered' column to users")
-                conn.execute(text("ALTER TABLE users ADD COLUMN plan_grandfathered BOOLEAN DEFAULT FALSE NOT NULL"))
-                conn.commit()
-            if 'stripe_customer_id' not in existing_cols:
-                logger.info("Migrating: adding 'stripe_customer_id' column to users")
-                conn.execute(text("ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(128)"))
-                conn.commit()
-            # Idempotent index on plan for fast cap lookups
-            try:
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_plan ON users (plan)"))
-                conn.commit()
-            except Exception as e:
-                logger.debug(f"Index ix_users_plan may already exist: {e}")
-            try:
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)"))
-                conn.commit()
-            except Exception as e:
-                logger.debug(f"Index ix_users_stripe_customer_id may already exist: {e}")
-
-            # Grandfather: any user that exists at the moment the 'plan'
-            # column is first added gets 'pro' access forever (no card
-            # required). Gated by a schema_migrations flag so this only
-            # runs the first time the plan column is added — subsequent
-            # restarts won't re-grandfather new signups.
-            with eng.connect() as conn:
-                # Make sure schema_migrations exists
-                conn.execute(text(
-                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
-                    "  name VARCHAR(128) PRIMARY KEY,"
-                    "  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
-                    ")"
-                ))
-                conn.commit()
-                already = conn.execute(text(
-                    "SELECT 1 FROM schema_migrations WHERE name = 'grandfather_users_to_pro'"
-                )).first()
-                if not already:
-                    grandfather_count = conn.execute(text(
-                        "UPDATE users SET plan = 'pro', plan_grandfathered = TRUE "
-                        "WHERE plan_grandfathered = FALSE AND created_at IS NOT NULL"
-                    )).rowcount
-                    if grandfather_count:
-                        logger.info(
-                            f"Migrating: grandfathered {grandfather_count} existing user(s) to pro plan"
-                        )
-                    conn.execute(text(
-                        "INSERT INTO schema_migrations (name) VALUES ('grandfather_users_to_pro')"
-                    ))
-                    conn.commit()
-
-    # New billing tables (subscriptions, usage_events) are created automatically
-    # by Base.metadata.create_all() above, so no inline ALTER needed.
 
 
 def get_db():
