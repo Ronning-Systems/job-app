@@ -86,15 +86,26 @@ This guide walks through configuring Auth0 as the identity provider for Joblign.
 
 ## 6. Current Configuration
 
-The following values are already configured in the deployed application:
+The following values are envsubst'd into `static/index.html` at deploy
+time by `my-stack/deploy-patrick-mini.sh`. The values shown below are
+the **source-tree defaults** (used as local-dev fallbacks when the api
+is run without the envsubst pass, e.g. `run_local_docker.sh` without
+the matching env vars set). The deployed prod and test envs read their
+own per-env values from their respective `.env.patrick-mini[.test]`
+files; see `my-stack/docs/auth0-setup.md` §6 for the per-env table.
 
-| Variable | Value |
+| Variable | Source-tree default (local-dev fallback) |
 |---|---|
-| `AUTH0_DOMAIN` | `auth.ronning.systems` |
-| `AUTH0_CLIENT_ID` | `sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8` |
+| `AUTH0_DOMAIN` | `dev-saxftot48835pavp.us.auth0.com` (the test tenant; also the underlying tenant of the prod custom domain `auth.ronning.systems`) |
+| `AUTH0_CLIENT_ID` | `sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8` (prod SPA Application) |
 | `AUTH0_AUDIENCE` | `https://jobsync/api` (opaque, do not rename) |
-| `CORS_ORIGIN` | `https://joblign.ronning.systems` |
 
-In production these are materialized from Vault by the `jobapp-secrets-fetcher`
-sidecar (see `my-stack/portainer/stacks/jobapp.yml`); the deploy orchestrator is
-`my-stack/deploy-patrick-mini.sh`.
+The `static/index.html` source contains literal `${AUTH0_*}` placeholders.
+To change the Auth0 wiring in any deployed env, edit the matching
+`AUTH0_*` field in the env's `.env.patrick-mini[.test]` and re-run
+the deploy. Do NOT edit `static/index.html` directly to set a real
+client ID — the envsubst pass will overwrite it on the next build.
+
+In production these values are also materialized from Vault by the
+`jobapp-secrets-fetcher` sidecar (see `my-stack/portainer/stacks/jobapp.yml`);
+the deploy orchestrator is `my-stack/deploy-patrick-mini.sh`.

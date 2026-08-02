@@ -1624,10 +1624,37 @@ The AI will automatically extract:
             : 'http://localhost:8765/api';
 
         // ─── Auth0 Configuration ───
-        const AUTH0_DOMAIN = 'auth.ronning.systems';
-        const AUTH0_CLIENT_ID = 'sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8';
-        const AUTH0_AUDIENCE = 'https://jobsync/api';
+        // The Auth0 values below are envsubst'd at deploy time by
+        // my-stack/deploy-patrick-mini.sh. The source-of-truth defaults
+        // in the fallback constants below are only used when the api is
+        // run without envsubst (e.g. local `run_local_docker.sh` without
+        // the envsubst pass). The deploy script's envsubst pass replaces
+        // each ${AUTH0_*} with the per-env value from the active
+        // .env.patrick-mini[.test]. To change the deployed frontend's
+        // Auth0 wiring, edit the matching AUTH0_* field in
+        // .env.patrick-mini (prod) or .env.patrick-mini.test (test) —
+        // NOT this file.
+        const AUTH0_DOMAIN = '${AUTH0_DOMAIN}';
+        const AUTH0_CLIENT_ID = '${AUTH0_CLIENT_ID}';
+        const AUTH0_AUDIENCE = '${AUTH0_AUDIENCE}';
+        // Local-dev fallbacks used when envsubst has not run (the values
+        // above still start with '${'). Match what run_local_docker.sh
+        // passes as AUTH0_DOMAIN by default (the test tenant) so a
+        // developer's local docker run is the closest analogue to the
+        // test env. Prod deploys always have envsubst'd these, so the
+        // fallback is unreachable in prod.
+        const _AUTH0_DOMAIN_FALLBACK = 'dev-saxftot48835pavp.us.auth0.com';
+        const _AUTH0_CLIENT_ID_FALLBACK = 'sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8';
+        const _AUTH0_AUDIENCE_FALLBACK = 'https://jobsync/api';
         const AUTH0_REDIRECT_URI = window.location.origin;
+        // If envsubst did not run (local dev), the AUTH0_* constants above
+        // still start with '${' and would break the Auth0 SDK. Substitute
+        // the local-dev fallbacks in that case. The deploy script's
+        // envsubst pass replaces these with per-env values, so this branch
+        // is unreachable in any deployed env.
+        const AUTH0_DOMAIN_RESOLVED = AUTH0_DOMAIN.startsWith('${') ? _AUTH0_DOMAIN_FALLBACK : AUTH0_DOMAIN;
+        const AUTH0_CLIENT_ID_RESOLVED = AUTH0_CLIENT_ID.startsWith('${') ? _AUTH0_CLIENT_ID_FALLBACK : AUTH0_CLIENT_ID;
+        const AUTH0_AUDIENCE_RESOLVED = AUTH0_AUDIENCE.startsWith('${') ? _AUTH0_AUDIENCE_FALLBACK : AUTH0_AUDIENCE;
 
         let auth0Client = null;
         let currentUser = null;
@@ -1667,11 +1694,11 @@ The AI will automatically extract:
                 // fast and show the login overlay rather than freezing.
                 const initTimeoutMs = 15000;
                 const initPromise = window.auth0.createAuth0Client({
-                    domain: AUTH0_DOMAIN,
-                    clientId: AUTH0_CLIENT_ID,
+                    domain: AUTH0_DOMAIN_RESOLVED,
+                    clientId: AUTH0_CLIENT_ID_RESOLVED,
                     authorizationParams: {
                         redirect_uri: AUTH0_REDIRECT_URI,
-                        audience: AUTH0_AUDIENCE,
+                        audience: AUTH0_AUDIENCE_RESOLVED,
                         scope: 'openid profile email offline_access',
                     },
                     cacheLocation: 'localstorage',
