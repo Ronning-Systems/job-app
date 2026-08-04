@@ -49,7 +49,7 @@ services:
     volumes:
       - /srv/jobapp-test/postgres:/var/lib/postgresql/data
     networks:
-      - proxy
+      - proxy-test
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp_test"]
       interval: 10s
@@ -70,7 +70,17 @@ services:
       - vault_token
     volumes:
       - jobapp-test-secrets:/secrets
+    # secrets-fetcher-test attaches to BOTH proxy-test AND proxy:
+    #   - proxy-test: to be reachable by api-test on the test env's
+    #     Docker DNS (api-test depends on it to get its secret env)
+    #   - proxy: to reach the shared vault container at
+    #     http://vault:8200 (vault lives on the prod network; only
+    #     this one test-env service has the cross-mount).
+    # Without both, the secrets-fetcher can't pull from vault and
+    # the api won't get its env vars. This is the one intentional
+    # cross-network attachment in the test stack.
     networks:
+      - proxy-test
       - proxy
     read_only: true
     security_opt:
@@ -93,7 +103,7 @@ services:
     tmpfs:
       - /tmp
     networks:
-      - proxy
+      - proxy-test
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
       interval: 15s
@@ -119,7 +129,7 @@ services:
     tmpfs:
       - /tmp
     networks:
-      - proxy
+      - proxy-test
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz').read()"]
       interval: 15s
@@ -162,7 +172,7 @@ services:
     volumes:
       - jobapp-test-secrets:/secrets:ro
     networks:
-      - proxy
+      - proxy-test
     depends_on:
       postgres-test:
         condition: service_healthy
@@ -180,6 +190,21 @@ services:
       start_period: 30s
 
 networks:
+  # proxy-test is the test-env-only Docker network, created by
+  # my-stack/portainer/stacks/network-test.yml. All test-env
+  # services attach to this. The test Traefik (also on this
+  # network) routes joblign.test.ronning.systems to the api-test
+  # container.
+  proxy-test:
+    external: true
+    name: proxy-test
+  # proxy is the SHARED Docker network (created by the prod deploy).
+  # Only secrets-fetcher-test attaches to this — it needs to reach
+  # the vault container, which is shared with prod and lives on
+  # the prod network. No other test-env service attaches to
+  # proxy; the test env cannot reach prod's api, postgres, or
+  # sidecars by Docker DNS name (DNS isolation, see
+  # my-stack/AGENTS.md "Architecture" section).
   proxy:
     external: true
     name: proxy

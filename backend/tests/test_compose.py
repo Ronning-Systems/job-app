@@ -99,12 +99,48 @@ def test_uses_external_proxy_network(compose_pair):
     """The proxy network is created by the my-stack deploy script
     (one-time setup), not by this compose. The 'external: true'
     declaration prevents `docker compose up` from trying to create
-    it (which would fail silently on a fresh host)."""
+    it (which would fail silently on a fresh host).
+
+    For the test compose (docker-compose.test.yml): since the
+    2026-08-03 refactor split Traefik + network, the test stack
+    also declares proxy-test as an external network. The test
+    Traefik routes to api-test via proxy-test; secrets-fetcher-test
+    is the ONLY test service that still attaches to the prod
+    proxy network (it needs to reach the shared Vault container
+    there).
+    """
     filename, compose, _ = compose_pair
     assert compose["networks"]["proxy"]["external"] is True, \
         f"{filename} proxy network must be external"
     assert compose["networks"]["proxy"]["name"] == "proxy", \
         f"{filename} proxy network name must be 'proxy'"
+    if filename == "docker-compose.test.yml":
+        # Test compose must ALSO declare proxy-test (the test env's
+        # own network, separate from prod's). Locked in by this
+        # test so a future refactor that drops proxy-test fails
+        # loud.
+        assert compose["networks"]["proxy-test"]["external"] is True, \
+            f"{filename} proxy-test network must be external"
+        assert compose["networks"]["proxy-test"]["name"] == "proxy-test", \
+            f"{filename} proxy-test network name must be 'proxy-test'"
+        # AND only secrets-fetcher-test should be on the prod
+        # proxy network. Every other test service must use
+        # proxy-test only — DNS isolation between envs.
+        for svc_name, svc in compose["services"].items():
+            nets = svc.get("networks", [])
+            if svc_name == "secrets-fetcher-test":
+                # The one allowed exception: needs to reach the
+                # shared vault on the prod network. Must attach
+                # to BOTH networks.
+                assert "proxy" in nets, \
+                    f"{filename} {svc_name} must attach to proxy (vault)"
+                assert "proxy-test" in nets, \
+                    f"{filename} {svc_name} must attach to proxy-test (api)"
+            else:
+                assert "proxy" not in nets, \
+                    f"{filename} {svc_name} must NOT be on prod proxy network (DNS isolation)"
+                assert "proxy-test" in nets, \
+                    f"{filename} {svc_name} must be on proxy-test"
 
 
 def test_api_depends_on_all_components(compose_pair):
