@@ -2061,7 +2061,7 @@ The AI will automatically extract:
                                 <i class="fas fa-envelope-open-text"></i> View Cover Letter
                             </button>
                         ` : `
-                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="Create Cover Letter">
+                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateCoverLetter(${job.id})" title="Create Cover Letter">
                                 <i class="fas fa-magic"></i> Create Cover Letter
                             </button>
                         `}
@@ -4122,7 +4122,13 @@ The AI will automatically extract:
         let currentCoverLetterJobId = null;
 
         document.getElementById('btn-cover-letter-editor').addEventListener('click', () => {
-            if (currentCoverLetterJobId) openCoverLetterEditor(currentCoverLetterJobId);
+            if (!currentCoverLetterJobId) return;
+            const job = jobs.find(j => j.id === currentCoverLetterJobId);
+            if (job && job.has_cover_letter) {
+                openCoverLetterEditor(currentCoverLetterJobId);
+            } else {
+                generateCoverLetter(currentCoverLetterJobId);
+            }
         });
         document.getElementById('btn-close-cover-letter-editor').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));
         document.getElementById('btn-close-cover-letter-editor-footer').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));
