@@ -81,9 +81,9 @@ authoritative ops conventions.
 
 - Public (prod): `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
 - Tailscale-only fallback (prod): `https://job-app.patrick-mini.ts.net`
-- Tailscale-only (test): `https://joblign.test.ronning.systems:9443/` — **must be
+- Tailscale-only (test): `https://joblign.test.ronning.systems:9444/` — **must be
   on the tailnet to reach** (test Traefik binds ONLY to the Tailscale
-  interface at the host level, on non-standard port :9443 because
+  interface at the host level, on non-standard port :9444 because
   the prod Traefik owns :80/:443 on this host; no public DNS, no
   Let's Encrypt). Resolves via Tailscale split-DNS to `patrick-mini`'s
   Tailscale IP.
