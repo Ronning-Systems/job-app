@@ -21,11 +21,34 @@ has stated explicitly. Read this before taking action that might conflict.
 ## Deploy workflow — owned by `my-stack`, not this repo
 
 **This repo (`job-app`) is the application source. It does not contain
-the deploy orchestrator.** The canonical deploy is
-`my-stack/deploy-patrick-mini.sh`, which builds the image on
-`patrick-mini` via `docker buildx`, renders the Traefik config and the
-five compose stacks with `envsubst`, and brings them up with
+the deploy orchestrator.** The canonical deploys are
+`my-stack/deploy-patrick-mini.sh` (prod) and
+`my-stack/deploy-patrick-mini-test.sh` (test). Both build the image
+on `patrick-mini` via `docker buildx` and bring the env up with
 `docker compose -p <name> up -d`.
+
+Before 2026-08-03 the test deploy was a `--test` flag on the prod
+script. The flag was removed because the shared code path let a
+broken test deploy clobber the prod Traefik routing (Pitfall #25).
+Now the test env has its own Traefik instance, its own compose
+network (`proxy-test`, separate from prod's `proxy`), and its own
+deploy script. See `my-stack/AGENTS.md` for the full architecture
+notes.
+
+### Test-env network topology
+
+The test stack attaches to TWO Docker networks:
+
+- `proxy-test` — created by `my-stack/portainer/stacks/network-test.yml`.
+  Carries the test Traefik + all 5 test services. Test-side DNS
+  isolation: api-test cannot resolve prod's services by name.
+- `proxy` — the SHARED prod network. Only `secrets-fetcher-test`
+  attaches here, because it needs to reach the shared Vault
+  container at `http://vault:8200`. The vault token file at
+  `/srv/jobapp/vault/jobapp.token` is also shared between envs
+  (chmod 644, root-owned, written by both deploy scripts).
+
+Locked in by `backend/tests/test_compose.py::test_uses_external_proxy_network`.
 
 To redeploy after edits to `job-app`:
 
@@ -36,8 +59,11 @@ git merge --allow-unrelated-histories -X theirs job-app/main
 git checkout HEAD -- AGENTS.md .gitignore   # restore ops-only overrides
 git commit -m "Sync app code from job-app@<sha>"
 
-# 2. Deploy (from my-stack/):
+# 2a. Deploy prod (from my-stack/):
 ./deploy-patrick-mini.sh
+
+# 2b. OR deploy test (from my-stack/):
+./deploy-patrick-mini-test.sh
 ```
 
 ### Cloud Run is retired
@@ -46,14 +72,19 @@ GCP / Cloud Run is **no longer a deploy target**. The Cloud Run scripts
 (`deploy.sh`, `deploy-setup.sh`, `migrate-traffic.sh`, `rollback.sh`,
 `status.sh`), `cloudbuild.yaml`, and `DEPLOYMENT.md` have been removed
 from this repo. If they resurface after a sync, delete them again —
-they are stale. The canonical deploy path is `deploy-patrick-mini.sh`
-in `my-stack`, full stop. See `my-stack/AGENTS.md` for the authoritative
-ops conventions.
+they are stale. The canonical deploy paths are
+`deploy-patrick-mini.sh` (prod) and `deploy-patrick-mini-test.sh`
+(test) in `my-stack`, full stop. See `my-stack/AGENTS.md` for the
+authoritative ops conventions.
 
 ### Production URL
 
-- Public: `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
-- Tailscale-only fallback: `https://job-app.patrick-mini.ts.net`
+- Public (prod): `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
+- Tailscale-only fallback (prod): `https://job-app.patrick-mini.ts.net`
+- Tailscale-only (test): `https://joblign.test.ronning.systems` — **must be
+  on the tailnet to reach** (test Traefik binds ONLY to the Tailscale
+  interface at the host level; no public DNS, no Let's Encrypt).
+  Resolves via Tailscale split-DNS to `patrick-mini`'s Tailscale IP.
 
 ## Database migrations — Alembic
 
