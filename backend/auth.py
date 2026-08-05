@@ -46,10 +46,17 @@ AUTH0_ISSUERS = [
 ]
 
 # Local-dev bypass. When AUTH_DISABLED is truthy, get_current_user returns a
-# single shared dev user without validating any token. Production must never
-# set this.
+# shared dev user without validating any token. Production must never set this.
+# On test, an optional ACCOUNT_ID env var (1-10) selects which test profile to
+# use, enabling dispersed sample data across multiple profiles.
 AUTH_DISABLED = os.getenv("AUTH_DISABLED", "").lower() in ("1", "true", "yes")
-DEV_USER_AUTH0_ID = "local-dev"
+_TEST_ACCOUNT_ID = os.getenv("ACCOUNT_ID", "").strip()
+# Validate ACCOUNT_ID is 1-10 if provided; fall back to "local-dev" otherwise.
+if _TEST_ACCOUNT_ID and _TEST_ACCOUNT_ID.isdigit() and 1 <= int(_TEST_ACCOUNT_ID) <= 10:
+    DEV_USER_AUTH0_ID = f"test-account-{_TEST_ACCOUNT_ID}"
+else:
+    DEV_USER_AUTH0_ID = "local-dev"
+del _TEST_ACCOUNT_ID  # clean up namespace
 
 # JWKS cache keyed by issuer domain. Because Auth0 can issue tokens with
 # either the custom domain or the original tenant as `iss`, we must fetch

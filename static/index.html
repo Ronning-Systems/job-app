@@ -722,6 +722,24 @@
         font-size: 1rem; font-weight: 600; transition: background 0.2s;
     }
     .auth-modal .btn-login-modal:hover { background: #4338ca; }
+
+    /* Test account picker styles */
+    .account-picker { margin-top: 16px; }
+    .account-picker label { display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 8px; }
+    .account-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 8px; }
+    .account-btn {
+        padding: 10px 8px; border: 2px solid var(--gray-300);
+        border-radius: 8px; background: white; color: var(--gray-700);
+        cursor: pointer; font-size: 0.85rem; font-weight: 600;
+        transition: all 0.2s; text-align: center;
+    }
+    .account-btn:hover { border-color: var(--primary); background: #f0f0ff; }
+    .account-btn.selected { border-color: var(--primary); background: var(--primary); color: white; }
+    .test-badge {
+        display: inline-block; background: #22c55e; color: white;
+        font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
+        margin-left: 8px; font-weight: 600; vertical-align: middle;
+    }
     </style>
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
@@ -738,7 +756,15 @@
         <div class="auth-modal">
             <h2>Joblign</h2>
             <p>Get aligned for success</p>
-            <button class="btn-login-modal" onclick="login()">Sign In</button>
+
+            <!-- Auth0 login (production) -->
+            <button class="btn-login-modal" id="btn-auth0-login" onclick="login()">Sign In</button>
+
+            <!-- Test account picker (when auth_disabled=true) -->
+            <div class="account-picker" id="account-picker" style="display: none;">
+                <label>Select Test Account <span class="test-badge">TEST</span></label>
+                <div class="account-grid" id="account-grid"></div>
+            </div>
         </div>
     </div>
     <!-- Header -->
@@ -1668,21 +1694,65 @@ The AI will automatically extract:
                 const res = await fetch('/api/health');
                 const data = await res.json().catch(() => ({}));
                 if (data.auth_disabled) {
-                    currentUser = {
-                        sub: 'local-dev',
-                        name: 'Local Dev',
-                        email: 'dev@localhost',
-                        picture: '',
-                    };
-                    document.getElementById('auth-overlay').style.display = 'none';
-                    updateAuthUI();
-                    initApp();
-                    return;
+                    // Test mode: show account picker instead of Auth0 login.
+                    const savedAccountId = localStorage.getItem('test_account_id');
+                    buildAccountPicker(savedAccountId ? parseInt(savedAccountId, 10) : 1);
+                    document.getElementById('btn-auth0-login').style.display = 'none';
+                    return; // Don't auto-load — wait for account selection.
                 }
             } catch (err) {
                 console.warn('Health check failed, falling back to Auth0:', err);
             }
             await initAuth();
+        }
+
+        // ─── Test Account Picker ───
+        function buildAccountPicker(selectedId) {
+            const picker = document.getElementById('account-picker');
+            const grid = document.getElementById('account-grid');
+            picker.style.display = 'block';
+            grid.innerHTML = '';
+
+            for (let i = 1; i <= 10; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'account-btn' + (i === selectedId ? ' selected' : '');
+                btn.textContent = `Account ${i}`;
+                btn.onclick = () => selectTestAccount(i);
+                grid.appendChild(btn);
+            }
+
+            // Auto-select from URL query param or localStorage
+            const urlParams = new URLSearchParams(window.location.search);
+            const accountFromUrl = parseInt(urlParams.get('account'), 10);
+            if (accountFromUrl && accountFromUrl >= 1 && accountFromUrl <= 10) {
+                selectTestAccount(accountFromUrl);
+            } else if (selectedId && selectedId >= 1 && selectedId <= 10) {
+                selectTestAccount(selectedId);
+            }
+        }
+
+        function selectTestAccount(accountId) {
+            // Update button selection styling
+            document.querySelectorAll('.account-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', idx + 1 === accountId);
+            });
+
+            // Persist selection and navigate
+            localStorage.setItem('test_account_id', accountId.toString());
+            const url = new URL(window.location);
+            url.searchParams.set('account', accountId.toString());
+            window.history.replaceState({}, '', url);
+
+            // Log in as this test account and load the app
+            currentUser = {
+                sub: `test-account-${accountId}`,
+                name: `Test User ${accountId}`,
+                email: `test${accountId}@joblign.test`,
+                picture: '',
+            };
+            document.getElementById('auth-overlay').style.display = 'none';
+            updateAuthUI();
+            initApp();
         }
 
         async function initAuth() {

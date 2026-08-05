@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     environment:
-      POSTGRES_DB: jobapp_test
+      POSTGRES_DB: jobapp
       POSTGRES_USER: jobapp
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     secrets:
@@ -51,7 +51,7 @@ services:
     networks:
       - proxy-test
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp_test"]
+      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -154,6 +154,15 @@ services:
       # rollup endpoint probes these same URLs.
       AUTOAPPLY_URL: "http://auto-apply-test:8081"
       FETCHER_URL: "http://fetcher-test:8080"
+      # Disable Auth0 on test so the SPA skips login entirely and
+      # uses a local-dev user.  The frontend also supports an
+      # ACCOUNT_ID query param (1-10) to pick which test profile to
+      # use, enabling dispersed sample data across multiple profiles.
+      AUTH_DISABLED: "true"
+      # Optional: set to 1-10 to pin a specific test account. When
+      # omitted, the frontend shows an account picker so users can
+      # choose which of 10 test profiles to use.
+      ACCOUNT_ID: ""
       # Override the Auth0 settings so the api uses the Test
       # Application in Auth0 (created for this env). The prod
       # values come from secret/jobapp/prod via the
