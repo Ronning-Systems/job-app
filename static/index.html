@@ -354,6 +354,44 @@
             opacity: 0.5;
         }
 
+        /* First-time user inline guide inside the empty state */
+        .first-time-guide {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 10px;
+            background: var(--gray-50);
+            border: 1px dashed var(--gray-300);
+            text-align: left;
+            max-width: 360px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .first-time-steps {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 4px;
+            counter-reset: fts;
+        }
+
+        .first-time-steps li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            color: var(--gray-700);
+            font-size: 0.92rem;
+        }
+
+        .first-time-steps li i {
+            font-size: 1rem;
+            width: 22px;
+            text-align: center;
+            opacity: 1;
+            margin: 0;
+            color: var(--primary);
+        }
+
         /* Modal */
         .modal-overlay {
             position: fixed;
@@ -1066,6 +1104,28 @@ The AI will automatically extract:
                         <button type="submit" class="btn btn-primary">Save Changes</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Welcome Modal (first-time onboarding) -->
+    <div class="modal-overlay" id="welcome-modal" style="z-index: 1600;">
+        <div class="modal" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-hand-sparkles" style="color: var(--primary);"></i> Welcome to Joblign</h2>
+                <button class="btn-close" id="btn-close-welcome" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="welcome-body" style="padding: 28px 24px 20px;">
+                <!-- Step content rendered by showWelcomeStep() -->
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button type="button" class="btn btn-secondary" id="btn-welcome-skip">Skip</button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span id="welcome-step-indicator" style="font-size: 0.8rem; color: var(--gray-500); margin-right: 8px;"></span>
+                    <button type="button" class="btn btn-primary" id="btn-welcome-next">
+                        Next <i class="fas fa-arrow-right" style="margin-left: 6px;"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2095,6 +2155,7 @@ The AI will automatically extract:
                 <div class="empty-state">
                     <i class="fas fa-inbox"></i>
                     <p>No active applications</p>
+                    ${activeJobsAll.length === 0 && archivedJobsAll.length === 0 ? renderFirstTimeGuide() : ''}
                 </div>
             `;
 
@@ -2105,6 +2166,11 @@ The AI will automatically extract:
                     <p>No archived applications</p>
                 </div>
             `;
+
+            // First-time user has no jobs anywhere — trigger welcome modal once.
+            if (activeJobsAll.length === 0 && archivedJobsAll.length === 0) {
+                maybeShowWelcomeModal();
+            }
 
             // Show/hide cards based on current filter
             if (activeCard) activeCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
@@ -2127,6 +2193,134 @@ The AI will automatically extract:
             });
 
             attachStageSelectHandlers();
+
+            // Wire up the inline "Add your first job" button in the empty-state
+            // first-time guide (only present when the user has no jobs at all).
+            const firstTimeBtn = document.querySelector('.btn-add-first-job');
+            if (firstTimeBtn) {
+                firstTimeBtn.addEventListener('click', () => {
+                    currentJobId = null;
+                    document.getElementById('modal-title').textContent = 'Add Job to Tracker';
+                    document.getElementById('job-form').reset();
+                    jobModal.classList.add('active');
+                    // Treat clicking the inline CTA as a soft dismissal of the
+                    // welcome modal so it doesn't pop again on the next render.
+                    try {
+                        localStorage.setItem(WELCOME_STORAGE_KEY, '1');
+                    } catch (e) { /* ignore */ }
+                });
+            }
+        }
+
+        // ============ First-time user onboarding ============
+        const WELCOME_STORAGE_KEY = 'joblign_welcome_seen';
+        const WELCOME_STEPS = [
+            {
+                icon: 'fa-cloud-upload-alt',
+                title: '1. Upload your resume',
+                body: 'In <b>Resume Settings</b>, add example resumes you\'ve used successfully and (optionally) a template DOCX. The AI uses them to match your voice and formatting when generating tailored resumes.',
+                cta: { label: 'Open Resume Settings', modalId: 'resume-settings-modal', closeCurrent: true }
+            },
+            {
+                icon: 'fa-plus-circle',
+                title: '2. Add your first job',
+                body: 'Click <b>Add Job to Tracker</b> and paste the job URL or description. Joblign will parse it, suggest keywords, and let you track each application through the pipeline.',
+                cta: { label: 'Add Job', modalId: 'job-modal', closeCurrent: true }
+            },
+            {
+                icon: 'fa-magic',
+                title: '3. Generate a tailored resume',
+                body: 'Once a job is added, click <b>Generate Resume</b> on the job card. Joblign aligns your resume to the job description. You can edit, save revisions, and export to DOCX.',
+                cta: null
+            }
+        ];
+        let welcomeStepIndex = 0;
+
+        function renderFirstTimeGuide() {
+            return `
+                <div class="first-time-guide">
+                    <p style="font-weight: 600; color: var(--gray-700); margin-bottom: 12px;">
+                        Get started in 3 steps:
+                    </p>
+                    <ol class="first-time-steps">
+                        <li><i class="fas fa-cloud-upload-alt"></i> Upload a resume</li>
+                        <li><i class="fas fa-plus-circle"></i> Add your first job</li>
+                        <li><i class="fas fa-magic"></i> Generate a tailored resume</li>
+                    </ol>
+                    <button type="button" class="btn btn-primary btn-add-first-job" style="margin-top: 16px;">
+                        <i class="fas fa-plus"></i> Add your first job
+                    </button>
+                </div>
+            `;
+        }
+
+        function maybeShowWelcomeModal() {
+            try {
+                if (localStorage.getItem(WELCOME_STORAGE_KEY)) return;
+            } catch (e) {
+                // localStorage may be unavailable (private mode); fall through and show anyway
+            }
+            // Defer one tick so the empty-state HTML is in the DOM first (the
+            // "Add your first job" button below needs to wire up after render).
+            setTimeout(() => {
+                const welcome = document.getElementById('welcome-modal');
+                if (!welcome) return;
+                welcomeStepIndex = 0;
+                showWelcomeStep();
+                welcome.classList.add('active');
+            }, 250);
+        }
+
+        function showWelcomeStep() {
+            const step = WELCOME_STEPS[welcomeStepIndex];
+            const body = document.getElementById('welcome-body');
+            const nextBtn = document.getElementById('btn-welcome-next');
+            const indicator = document.getElementById('welcome-step-indicator');
+            if (!body || !nextBtn || !indicator) return;
+
+            body.innerHTML = `
+                <div style="text-align: center; margin-bottom: 16px;">
+                    <i class="fas ${step.icon}" style="font-size: 2.5rem; color: var(--primary);"></i>
+                </div>
+                <h3 style="margin: 0 0 12px; font-size: 1.15rem; color: var(--gray-800);">${step.title}</h3>
+                <p style="margin: 0; color: var(--gray-600); line-height: 1.5;">${step.body}</p>
+            `;
+            indicator.textContent = `${welcomeStepIndex + 1} of ${WELCOME_STEPS.length}`;
+            const isLast = welcomeStepIndex === WELCOME_STEPS.length - 1;
+            nextBtn.innerHTML = isLast
+                ? 'Get started <i class="fas fa-check" style="margin-left: 6px;"></i>'
+                : 'Next <i class="fas fa-arrow-right" style="margin-left: 6px;"></i>';
+            nextBtn.dataset.cta = step.cta ? JSON.stringify(step.cta) : '';
+        }
+
+        function dismissWelcomeModal() {
+            const welcome = document.getElementById('welcome-modal');
+            if (welcome) welcome.classList.remove('active');
+            try {
+                localStorage.setItem(WELCOME_STORAGE_KEY, '1');
+            } catch (e) {
+                // Ignore — next session may show again, which is acceptable
+            }
+        }
+
+        function advanceWelcomeModal() {
+            const nextBtn = document.getElementById('btn-welcome-next');
+            const cta = nextBtn && nextBtn.dataset.cta ? JSON.parse(nextBtn.dataset.cta) : null;
+            if (welcomeStepIndex === WELCOME_STEPS.length - 1) {
+                dismissWelcomeModal();
+                return;
+            }
+            if (cta && cta.closeCurrent) dismissWelcomeModal();
+            welcomeStepIndex = Math.min(welcomeStepIndex + 1, WELCOME_STEPS.length - 1);
+            showWelcomeStep();
+            if (cta && cta.modalId) {
+                // Open the target modal on the next tick so the welcome dismiss
+                // animation/layout has a chance to settle.
+                setTimeout(() => {
+                    const target = document.getElementById(cta.modalId);
+                    if (target) target.classList.add('active');
+                }, 50);
+            }
         }
 
         function renderJobItem(job) {
@@ -2493,6 +2687,13 @@ The AI will automatically extract:
         }
 
         // Event Listeners
+        // Welcome modal (first-time onboarding) — wires up after the modal
+        // markup exists in the DOM. Skip and close both count as "seen" so the
+        // modal doesn't re-appear on every page load.
+        document.getElementById('btn-close-welcome').addEventListener('click', dismissWelcomeModal);
+        document.getElementById('btn-welcome-skip').addEventListener('click', dismissWelcomeModal);
+        document.getElementById('btn-welcome-next').addEventListener('click', advanceWelcomeModal);
+
         document.getElementById('btn-add-job').addEventListener('click', () => {
             currentJobId = null;
             document.getElementById('modal-title').textContent = 'Add Job to Tracker';
