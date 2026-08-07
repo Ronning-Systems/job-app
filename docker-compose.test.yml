@@ -40,8 +40,17 @@ services:
     container_name: jobapp-test-postgres
     restart: unless-stopped
     mem_limit: 512m
+    # Test env uses a SEPARATE postgres database name (jobapp_test,
+    # not jobapp) so a misconfigured DATABASE_URL can never silently
+    # route test-env queries into the prod schema. This is the
+    # defense-in-depth layer: even if the secrets-fetcher pulled
+    # the wrong DATABASE_URL into Vault (prod path instead of test
+    # path) and the api connected to prod postgres, postgres itself
+    # would reject the connection because the `jobapp_test` database
+    # doesn't exist there. Locked in by
+    # backend/tests/test_compose.py::test_test_compose_uses_separate_postgres_db.
     environment:
-      POSTGRES_DB: jobapp
+      POSTGRES_DB: jobapp_test
       POSTGRES_USER: jobapp
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     secrets:
@@ -51,7 +60,13 @@ services:
     networks:
       - proxy-test
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp"]
+      # Healthcheck targets jobapp_test (the new test DB name). If
+      # the test compose ever gets a fresh data dir, the init step
+      # only creates the DB named in POSTGRES_DB above; the
+      # healthcheck's -d flag must match that name or pg_isready
+      # returns "database does not exist" and the api's depends_on
+      # never resolves, leaving the stack in a restart loop.
+      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp_test"]
       interval: 10s
       timeout: 3s
       retries: 5
