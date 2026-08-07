@@ -1131,7 +1131,18 @@ The AI will automatically extract:
                     <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
                         New resumes are generated with Qwen 3.5 by default. Choose a different model here only if you want every generation to use it automatically.
                     </p>
-                    <div style="display: flex; align-items: center; gap: 12px;">
+                    <!--
+                        "Default Generation Model" is an advanced setting: most
+                        non-technical users should stay on the app default. We
+                        collapse it behind a button by default. Clicking reveals
+                        the picker; clicking again hides it. State is local to
+                        this modal — it does not persist across sessions, which
+                        matches the "show on demand" pattern.
+                    -->
+                    <button type="button" id="btn-toggle-advanced-model" class="btn btn-secondary" style="font-size: 0.85rem; margin-bottom: 12px;">
+                        <i class="fas fa-sliders"></i> Show advanced options
+                    </button>
+                    <div id="advanced-model-section" style="display: none; align-items: center; gap: 12px;">
                         <select id="resume-settings-default-model" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); min-width: 220px;">
                             <!-- Options populated by JS from AVAILABLE_MODELS -->
                         </select>
@@ -1316,19 +1327,42 @@ The AI will automatically extract:
         // Resume settings storage
         // Ordered list of available generation models. The first entry is the
         // app-wide default; users can override via Resume Settings.
+        //
+        // Plain-language labels (label) + tooltip descriptions (description) are
+        // used by every model <select> in the app: the Resume Settings default
+        // model picker, the per-generation Resume editor picker, and the
+        // per-generation Cover Letter editor picker. The tooltip is rendered
+        // via the native `title` attribute on each <option>, which browsers
+        // surface on hover — no extra widget needed.
         const DEFAULT_MODEL = 'qwen3.5:cloud';
         const AVAILABLE_MODELS = [
-            { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 65 tok/s' },
-            { value: 'qwen3.5:397b-cloud', label: 'Qwen 3.5 (397B) · 67 tok/s' },
-            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 193 tok/s' },
-            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 184 tok/s' },
-            { value: 'kimi-k2.6:cloud', label: 'Kimi K2.6 · 122 tok/s' },
-            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 108 tok/s' },
-            { value: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super · 98 tok/s' },
-            { value: 'deepseek-v4-pro:cloud', label: 'DeepSeek V4 Pro · 88 tok/s' },
-            { value: 'gemma4:cloud', label: 'Gemma 4 · 88 tok/s' },
-            { value: 'minimax-m2.7:cloud', label: 'MiniMax M2.7 · 48 tok/s' },
+            { value: 'qwen3.5:cloud',           label: 'Balanced · 65 tok/s',         description: 'Qwen 3.5 — good balance of quality and speed. Recommended for most resumes and cover letters.' },
+            { value: 'qwen3.5:397b-cloud',      label: 'Highest Quality · 67 tok/s',  description: 'Qwen 3.5 (397B) — our largest model. Best writing quality, especially for nuanced cover letters. Slower than Balanced.' },
+            { value: 'glm-5.1:cloud',           label: 'Fastest · 193 tok/s',         description: 'GLM 5.1 — our fastest model. Great for quick drafts and iteration.' },
+            { value: 'deepseek-v4-flash:cloud', label: 'Fast · 184 tok/s',            description: 'DeepSeek V4 Flash — fast and reliable for standard resume tailoring.' },
+            { value: 'kimi-k2.6:cloud',         label: 'Detailed Writing · 122 tok/s',description: 'Kimi K2.6 — strong at long-form narrative, useful for cover letter stories.' },
+            { value: 'minimax-m3:cloud',        label: 'Reliable · 108 tok/s',        description: 'MiniMax M3 — the model powering this app. Solid default for everyday use.' },
+            { value: 'nemotron-3-super:cloud',  label: 'Technical · 98 tok/s',        description: 'Nemotron 3 Super — strong on technical resumes (engineering, infrastructure, cloud).' },
+            { value: 'deepseek-v4-pro:cloud',   label: 'Pro Quality · 88 tok/s',      description: 'DeepSeek V4 Pro — higher-quality tier of DeepSeek for important applications.' },
+            { value: 'gemma4:cloud',            label: 'Concise · 88 tok/s',          description: 'Gemma 4 — concise and direct. Good if you want short, tight bullet points.' },
+            { value: 'minimax-m2.7:cloud',      label: 'Slower · 48 tok/s',           description: 'MiniMax M2.7 — older tier; included for users with existing preferences.' },
         ];
+
+        // Build the HTML for a single <option> with a tooltip.
+        // The label is the plain-language name shown in the dropdown; the
+        // description becomes the native `title` attribute, which most
+        // browsers surface on hover. We also escape both values so a quote
+        // in a description can't break the markup.
+        function modelOptionHtml(model, selectedValue) {
+            const safeLabel = String(model.label).replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+            const safeDesc = String(model.description || '').replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+            const selected = (selectedValue !== undefined && model.value === selectedValue) ? ' selected' : '';
+            return `<option value="${model.value}" title="${safeDesc}"${selected}>${safeLabel}</option>`;
+        }
 
         // Shared short labels for version dropdowns. Both resume and cover
         // letter versions show "v{N}-{Model}" with optional "(current)" and
@@ -2741,6 +2775,22 @@ The AI will automatically extract:
             document.getElementById('resume-settings-default-model').value = '';
         });
 
+        // Toggle the "Default Generation Model" advanced picker. Hidden by
+        // default so non-technical users see a clean Resume Settings page.
+        // We do not persist the open/closed state across modal opens: a fresh
+        // open always starts collapsed.
+        const advancedModelSection = document.getElementById('advanced-model-section');
+        const advancedModelToggleBtn = document.getElementById('btn-toggle-advanced-model');
+        if (advancedModelToggleBtn && advancedModelSection) {
+            advancedModelToggleBtn.addEventListener('click', () => {
+                const isHidden = advancedModelSection.style.display === 'none';
+                advancedModelSection.style.display = isHidden ? 'flex' : 'none';
+                advancedModelToggleBtn.innerHTML = isHidden
+                    ? '<i class="fas fa-sliders"></i> Hide advanced options'
+                    : '<i class="fas fa-sliders"></i> Show advanced options';
+            });
+        }
+
         // Notifications
         const notificationPanel = document.getElementById('notification-panel');
         document.getElementById('btn-notifications').addEventListener('click', (e) => {
@@ -2939,7 +2989,7 @@ The AI will automatically extract:
             if (defaultModelSelect) {
                 defaultModelSelect.innerHTML =
                     `<option value="">Qwen 3.5 (app default)</option>` +
-                    AVAILABLE_MODELS.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    AVAILABLE_MODELS.map(m => modelOptionHtml(m)).join('');
                 defaultModelSelect.value = settings.defaultModel || '';
             }
         }
@@ -3978,8 +4028,8 @@ The AI will automatically extract:
                     const defaultLabel = AVAILABLE_MODELS.find(m => m.value === defaultModel)?.label || defaultModel;
                     const otherModels = AVAILABLE_MODELS.filter(m => m.value !== defaultModel);
                     modelSelect.innerHTML =
-                        `<option value="">Default (${defaultLabel})</option>` +
-                        otherModels.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                        `<option value="" title="Use the model you set as your default in Resume Settings.">Default (${defaultLabel})</option>` +
+                        otherModels.map(m => modelOptionHtml(m)).join('');
                     modelSelect.value = ''; // default-on-default; user can override per-generation
                 }
                 
@@ -4235,7 +4285,7 @@ The AI will automatically extract:
             const modelSelect = document.getElementById('cover-letter-model-select');
             const currentModel = localStorage.getItem('joblign_cover_letter_model') || DEFAULT_MODEL;
             modelSelect.innerHTML = AVAILABLE_MODELS.map(m =>
-                `<option value="${m.value}" ${m.value === currentModel ? 'selected' : ''}>${m.label}</option>`
+                modelOptionHtml(m, m.value === currentModel ? m.value : undefined)
             ).join('');
 
             // Populate version selector from revisions
