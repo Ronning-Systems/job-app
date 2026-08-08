@@ -354,6 +354,44 @@
             opacity: 0.5;
         }
 
+        /* First-time user inline guide inside the empty state */
+        .first-time-guide {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 10px;
+            background: var(--gray-50);
+            border: 1px dashed var(--gray-300);
+            text-align: left;
+            max-width: 360px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .first-time-steps {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 4px;
+            counter-reset: fts;
+        }
+
+        .first-time-steps li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            color: var(--gray-700);
+            font-size: 0.92rem;
+        }
+
+        .first-time-steps li i {
+            font-size: 1rem;
+            width: 22px;
+            text-align: center;
+            opacity: 1;
+            margin: 0;
+            color: var(--primary);
+        }
+
         /* Modal */
         .modal-overlay {
             position: fixed;
@@ -1070,6 +1108,28 @@ The AI will automatically extract:
         </div>
     </div>
 
+    <!-- Welcome Modal (first-time onboarding) -->
+    <div class="modal-overlay" id="welcome-modal" style="z-index: 1600;">
+        <div class="modal" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-hand-sparkles" style="color: var(--primary);"></i> Welcome to Joblign</h2>
+                <button class="btn-close" id="btn-close-welcome" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="welcome-body" style="padding: 28px 24px 20px;">
+                <!-- Step content rendered by showWelcomeStep() -->
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button type="button" class="btn btn-secondary" id="btn-welcome-skip">Skip</button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span id="welcome-step-indicator" style="font-size: 0.8rem; color: var(--gray-500); margin-right: 8px;"></span>
+                    <button type="button" class="btn btn-primary" id="btn-welcome-next">
+                        Next <i class="fas fa-arrow-right" style="margin-left: 6px;"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Resume Generation Settings Modal -->
     <div class="modal-overlay" id="resume-settings-modal" style="z-index: 1500;">
         <div class="modal" style="max-width: 800px;">
@@ -1131,7 +1191,18 @@ The AI will automatically extract:
                     <p style="color: var(--gray-600); margin-bottom: 16px; font-size: 0.9rem;">
                         New resumes are generated with Qwen 3.5 by default. Choose a different model here only if you want every generation to use it automatically.
                     </p>
-                    <div style="display: flex; align-items: center; gap: 12px;">
+                    <!--
+                        "Default Generation Model" is an advanced setting: most
+                        non-technical users should stay on the app default. We
+                        collapse it behind a button by default. Clicking reveals
+                        the picker; clicking again hides it. State is local to
+                        this modal — it does not persist across sessions, which
+                        matches the "show on demand" pattern.
+                    -->
+                    <button type="button" id="btn-toggle-advanced-model" class="btn btn-secondary" style="font-size: 0.85rem; margin-bottom: 12px;">
+                        <i class="fas fa-sliders"></i> Show advanced options
+                    </button>
+                    <div id="advanced-model-section" style="display: none; align-items: center; gap: 12px;">
                         <select id="resume-settings-default-model" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); min-width: 220px;">
                             <!-- Options populated by JS from AVAILABLE_MODELS -->
                         </select>
@@ -1316,19 +1387,42 @@ The AI will automatically extract:
         // Resume settings storage
         // Ordered list of available generation models. The first entry is the
         // app-wide default; users can override via Resume Settings.
+        //
+        // Plain-language labels (label) + tooltip descriptions (description) are
+        // used by every model <select> in the app: the Resume Settings default
+        // model picker, the per-generation Resume editor picker, and the
+        // per-generation Cover Letter editor picker. The tooltip is rendered
+        // via the native `title` attribute on each <option>, which browsers
+        // surface on hover — no extra widget needed.
         const DEFAULT_MODEL = 'qwen3.5:cloud';
         const AVAILABLE_MODELS = [
-            { value: 'qwen3.5:cloud', label: 'Qwen 3.5 · 65 tok/s' },
-            { value: 'qwen3.5:397b-cloud', label: 'Qwen 3.5 (397B) · 67 tok/s' },
-            { value: 'glm-5.1:cloud', label: 'GLM 5.1 · 193 tok/s' },
-            { value: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash · 184 tok/s' },
-            { value: 'kimi-k2.6:cloud', label: 'Kimi K2.6 · 122 tok/s' },
-            { value: 'minimax-m3:cloud', label: 'MiniMax M3 · 108 tok/s' },
-            { value: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super · 98 tok/s' },
-            { value: 'deepseek-v4-pro:cloud', label: 'DeepSeek V4 Pro · 88 tok/s' },
-            { value: 'gemma4:cloud', label: 'Gemma 4 · 88 tok/s' },
-            { value: 'minimax-m2.7:cloud', label: 'MiniMax M2.7 · 48 tok/s' },
+            { value: 'qwen3.5:cloud',           label: 'Balanced · 65 tok/s',         description: 'Qwen 3.5 — good balance of quality and speed. Recommended for most resumes and cover letters.' },
+            { value: 'qwen3.5:397b-cloud',      label: 'Highest Quality · 67 tok/s',  description: 'Qwen 3.5 (397B) — our largest model. Best writing quality, especially for nuanced cover letters. Slower than Balanced.' },
+            { value: 'glm-5.1:cloud',           label: 'Fastest · 193 tok/s',         description: 'GLM 5.1 — our fastest model. Great for quick drafts and iteration.' },
+            { value: 'deepseek-v4-flash:cloud', label: 'Fast · 184 tok/s',            description: 'DeepSeek V4 Flash — fast and reliable for standard resume tailoring.' },
+            { value: 'kimi-k2.6:cloud',         label: 'Detailed Writing · 122 tok/s',description: 'Kimi K2.6 — strong at long-form narrative, useful for cover letter stories.' },
+            { value: 'minimax-m3:cloud',        label: 'Reliable · 108 tok/s',        description: 'MiniMax M3 — the model powering this app. Solid default for everyday use.' },
+            { value: 'nemotron-3-super:cloud',  label: 'Technical · 98 tok/s',        description: 'Nemotron 3 Super — strong on technical resumes (engineering, infrastructure, cloud).' },
+            { value: 'deepseek-v4-pro:cloud',   label: 'Pro Quality · 88 tok/s',      description: 'DeepSeek V4 Pro — higher-quality tier of DeepSeek for important applications.' },
+            { value: 'gemma4:cloud',            label: 'Concise · 88 tok/s',          description: 'Gemma 4 — concise and direct. Good if you want short, tight bullet points.' },
+            { value: 'minimax-m2.7:cloud',      label: 'Slower · 48 tok/s',           description: 'MiniMax M2.7 — older tier; included for users with existing preferences.' },
         ];
+
+        // Build the HTML for a single <option> with a tooltip.
+        // The label is the plain-language name shown in the dropdown; the
+        // description becomes the native `title` attribute, which most
+        // browsers surface on hover. We also escape both values so a quote
+        // in a description can't break the markup.
+        function modelOptionHtml(model, selectedValue) {
+            const safeLabel = String(model.label).replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+            const safeDesc = String(model.description || '').replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+            const selected = (selectedValue !== undefined && model.value === selectedValue) ? ' selected' : '';
+            return `<option value="${model.value}" title="${safeDesc}"${selected}>${safeLabel}</option>`;
+        }
 
         // Shared short labels for version dropdowns. Both resume and cover
         // letter versions show "v{N}-{Model}" with optional "(current)" and
@@ -2061,6 +2155,7 @@ The AI will automatically extract:
                 <div class="empty-state">
                     <i class="fas fa-inbox"></i>
                     <p>No active applications</p>
+                    ${activeJobsAll.length === 0 && archivedJobsAll.length === 0 ? renderFirstTimeGuide() : ''}
                 </div>
             `;
 
@@ -2071,6 +2166,11 @@ The AI will automatically extract:
                     <p>No archived applications</p>
                 </div>
             `;
+
+            // First-time user has no jobs anywhere — trigger welcome modal once.
+            if (activeJobsAll.length === 0 && archivedJobsAll.length === 0) {
+                maybeShowWelcomeModal();
+            }
 
             // Show/hide cards based on current filter
             if (activeCard) activeCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
@@ -2093,6 +2193,134 @@ The AI will automatically extract:
             });
 
             attachStageSelectHandlers();
+
+            // Wire up the inline "Add your first job" button in the empty-state
+            // first-time guide (only present when the user has no jobs at all).
+            const firstTimeBtn = document.querySelector('.btn-add-first-job');
+            if (firstTimeBtn) {
+                firstTimeBtn.addEventListener('click', () => {
+                    currentJobId = null;
+                    document.getElementById('modal-title').textContent = 'Add Job to Tracker';
+                    document.getElementById('job-form').reset();
+                    jobModal.classList.add('active');
+                    // Treat clicking the inline CTA as a soft dismissal of the
+                    // welcome modal so it doesn't pop again on the next render.
+                    try {
+                        localStorage.setItem(WELCOME_STORAGE_KEY, '1');
+                    } catch (e) { /* ignore */ }
+                });
+            }
+        }
+
+        // ============ First-time user onboarding ============
+        const WELCOME_STORAGE_KEY = 'joblign_welcome_seen';
+        const WELCOME_STEPS = [
+            {
+                icon: 'fa-cloud-upload-alt',
+                title: '1. Upload your resume',
+                body: 'In <b>Resume Settings</b>, add example resumes you\'ve used successfully and (optionally) a template DOCX. The AI uses them to match your voice and formatting when generating tailored resumes.',
+                cta: { label: 'Open Resume Settings', modalId: 'resume-settings-modal', closeCurrent: true }
+            },
+            {
+                icon: 'fa-plus-circle',
+                title: '2. Add your first job',
+                body: 'Click <b>Add Job to Tracker</b> and paste the job URL or description. Joblign will parse it, suggest keywords, and let you track each application through the pipeline.',
+                cta: { label: 'Add Job', modalId: 'job-modal', closeCurrent: true }
+            },
+            {
+                icon: 'fa-magic',
+                title: '3. Generate a tailored resume',
+                body: 'Once a job is added, click <b>Generate Resume</b> on the job card. Joblign aligns your resume to the job description. You can edit, save revisions, and export to DOCX.',
+                cta: null
+            }
+        ];
+        let welcomeStepIndex = 0;
+
+        function renderFirstTimeGuide() {
+            return `
+                <div class="first-time-guide">
+                    <p style="font-weight: 600; color: var(--gray-700); margin-bottom: 12px;">
+                        Get started in 3 steps:
+                    </p>
+                    <ol class="first-time-steps">
+                        <li><i class="fas fa-cloud-upload-alt"></i> Upload a resume</li>
+                        <li><i class="fas fa-plus-circle"></i> Add your first job</li>
+                        <li><i class="fas fa-magic"></i> Generate a tailored resume</li>
+                    </ol>
+                    <button type="button" class="btn btn-primary btn-add-first-job" style="margin-top: 16px;">
+                        <i class="fas fa-plus"></i> Add your first job
+                    </button>
+                </div>
+            `;
+        }
+
+        function maybeShowWelcomeModal() {
+            try {
+                if (localStorage.getItem(WELCOME_STORAGE_KEY)) return;
+            } catch (e) {
+                // localStorage may be unavailable (private mode); fall through and show anyway
+            }
+            // Defer one tick so the empty-state HTML is in the DOM first (the
+            // "Add your first job" button below needs to wire up after render).
+            setTimeout(() => {
+                const welcome = document.getElementById('welcome-modal');
+                if (!welcome) return;
+                welcomeStepIndex = 0;
+                showWelcomeStep();
+                welcome.classList.add('active');
+            }, 250);
+        }
+
+        function showWelcomeStep() {
+            const step = WELCOME_STEPS[welcomeStepIndex];
+            const body = document.getElementById('welcome-body');
+            const nextBtn = document.getElementById('btn-welcome-next');
+            const indicator = document.getElementById('welcome-step-indicator');
+            if (!body || !nextBtn || !indicator) return;
+
+            body.innerHTML = `
+                <div style="text-align: center; margin-bottom: 16px;">
+                    <i class="fas ${step.icon}" style="font-size: 2.5rem; color: var(--primary);"></i>
+                </div>
+                <h3 style="margin: 0 0 12px; font-size: 1.15rem; color: var(--gray-800);">${step.title}</h3>
+                <p style="margin: 0; color: var(--gray-600); line-height: 1.5;">${step.body}</p>
+            `;
+            indicator.textContent = `${welcomeStepIndex + 1} of ${WELCOME_STEPS.length}`;
+            const isLast = welcomeStepIndex === WELCOME_STEPS.length - 1;
+            nextBtn.innerHTML = isLast
+                ? 'Get started <i class="fas fa-check" style="margin-left: 6px;"></i>'
+                : 'Next <i class="fas fa-arrow-right" style="margin-left: 6px;"></i>';
+            nextBtn.dataset.cta = step.cta ? JSON.stringify(step.cta) : '';
+        }
+
+        function dismissWelcomeModal() {
+            const welcome = document.getElementById('welcome-modal');
+            if (welcome) welcome.classList.remove('active');
+            try {
+                localStorage.setItem(WELCOME_STORAGE_KEY, '1');
+            } catch (e) {
+                // Ignore — next session may show again, which is acceptable
+            }
+        }
+
+        function advanceWelcomeModal() {
+            const nextBtn = document.getElementById('btn-welcome-next');
+            const cta = nextBtn && nextBtn.dataset.cta ? JSON.parse(nextBtn.dataset.cta) : null;
+            if (welcomeStepIndex === WELCOME_STEPS.length - 1) {
+                dismissWelcomeModal();
+                return;
+            }
+            if (cta && cta.closeCurrent) dismissWelcomeModal();
+            welcomeStepIndex = Math.min(welcomeStepIndex + 1, WELCOME_STEPS.length - 1);
+            showWelcomeStep();
+            if (cta && cta.modalId) {
+                // Open the target modal on the next tick so the welcome dismiss
+                // animation/layout has a chance to settle.
+                setTimeout(() => {
+                    const target = document.getElementById(cta.modalId);
+                    if (target) target.classList.add('active');
+                }, 50);
+            }
         }
 
         function renderJobItem(job) {
@@ -2459,6 +2687,13 @@ The AI will automatically extract:
         }
 
         // Event Listeners
+        // Welcome modal (first-time onboarding) — wires up after the modal
+        // markup exists in the DOM. Skip and close both count as "seen" so the
+        // modal doesn't re-appear on every page load.
+        document.getElementById('btn-close-welcome').addEventListener('click', dismissWelcomeModal);
+        document.getElementById('btn-welcome-skip').addEventListener('click', dismissWelcomeModal);
+        document.getElementById('btn-welcome-next').addEventListener('click', advanceWelcomeModal);
+
         document.getElementById('btn-add-job').addEventListener('click', () => {
             currentJobId = null;
             document.getElementById('modal-title').textContent = 'Add Job to Tracker';
@@ -2747,6 +2982,22 @@ The AI will automatically extract:
             document.getElementById('resume-settings-default-model').value = '';
         });
 
+        // Toggle the "Default Generation Model" advanced picker. Hidden by
+        // default so non-technical users see a clean Resume Settings page.
+        // We do not persist the open/closed state across modal opens: a fresh
+        // open always starts collapsed.
+        const advancedModelSection = document.getElementById('advanced-model-section');
+        const advancedModelToggleBtn = document.getElementById('btn-toggle-advanced-model');
+        if (advancedModelToggleBtn && advancedModelSection) {
+            advancedModelToggleBtn.addEventListener('click', () => {
+                const isHidden = advancedModelSection.style.display === 'none';
+                advancedModelSection.style.display = isHidden ? 'flex' : 'none';
+                advancedModelToggleBtn.innerHTML = isHidden
+                    ? '<i class="fas fa-sliders"></i> Hide advanced options'
+                    : '<i class="fas fa-sliders"></i> Show advanced options';
+            });
+        }
+
         // Notifications
         const notificationPanel = document.getElementById('notification-panel');
         document.getElementById('btn-notifications').addEventListener('click', (e) => {
@@ -2945,7 +3196,7 @@ The AI will automatically extract:
             if (defaultModelSelect) {
                 defaultModelSelect.innerHTML =
                     `<option value="">Qwen 3.5 (app default)</option>` +
-                    AVAILABLE_MODELS.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    AVAILABLE_MODELS.map(m => modelOptionHtml(m)).join('');
                 defaultModelSelect.value = settings.defaultModel || '';
             }
         }
@@ -3984,8 +4235,8 @@ The AI will automatically extract:
                     const defaultLabel = AVAILABLE_MODELS.find(m => m.value === defaultModel)?.label || defaultModel;
                     const otherModels = AVAILABLE_MODELS.filter(m => m.value !== defaultModel);
                     modelSelect.innerHTML =
-                        `<option value="">Default (${defaultLabel})</option>` +
-                        otherModels.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                        `<option value="" title="Use the model you set as your default in Resume Settings.">Default (${defaultLabel})</option>` +
+                        otherModels.map(m => modelOptionHtml(m)).join('');
                     modelSelect.value = ''; // default-on-default; user can override per-generation
                 }
                 
@@ -4241,7 +4492,7 @@ The AI will automatically extract:
             const modelSelect = document.getElementById('cover-letter-model-select');
             const currentModel = localStorage.getItem('joblign_cover_letter_model') || DEFAULT_MODEL;
             modelSelect.innerHTML = AVAILABLE_MODELS.map(m =>
-                `<option value="${m.value}" ${m.value === currentModel ? 'selected' : ''}>${m.label}</option>`
+                modelOptionHtml(m, m.value === currentModel ? m.value : undefined)
             ).join('');
 
             // Populate version selector from revisions
