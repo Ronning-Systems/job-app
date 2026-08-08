@@ -2925,8 +2925,14 @@ The AI will automatically extract:
             });
         });
 
-        // Initial highlight
-        setFilter(currentFilter);
+        // Initial highlight — toggle the active stat card WITHOUT triggering
+        // a network fetch. setFilter() → renderJobs() → updateStats() →
+        // fetchStats() fires /api/stats, which 401s before Auth0 init
+        // completes (and again during the redirect callback when the page
+        // reloads with ?code=...). That unauthenticated request is the sign-in
+        // auth jitter. The real data + stats load happens inside initApp(),
+        // which runs only after auth succeeds.
+        document.querySelectorAll('.stat[data-filter]').forEach(s => s.classList.toggle('active', s.dataset.filter === currentFilter));
 
         // Close modals on overlay click
         jobModal.addEventListener('click', (e) => {
