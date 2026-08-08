@@ -56,6 +56,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json as _json
+import logging
 import os
 import secrets
 import time
@@ -65,6 +66,8 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from playwright.async_api import Browser, Error as PlaywrightError, async_playwright
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -102,8 +105,30 @@ _browser: Browser | None = None
 def _hmac_secret() -> bytes:
     """Return the shared HMAC secret. Raises 503 if not configured —
     the container is misconfigured and we want a loud failure, not a
-    silent acceptance of empty signatures."""
+    silent acceptance of empty signatures.
+
+    Resolution order:
+      1. ``AUTOAPPLY_HMAC_SECRET`` env var (legacy / test path)
+      2. ``AUTOAPPLY_HMAC_SECRET_FILE`` pointing at a mounted secret
+         file (the deploy wiring — docker-compose sets this so the
+         secret never appears in ``docker inspect`` output)
+
+    Either source yields the same secret the api signs with; the
+    _FILE variant lets Docker mount the secret without leaking it
+    into the container's env.
+    """
     raw = os.environ.get("AUTOAPPLY_HMAC_SECRET", "")
+    if not raw:
+        # Fall back to a mounted secret file (docker-compose sets
+        # AUTOAPPLY_HMAC_SECRET_FILE=/run/secrets/autoapply_hmac_secret).
+        secret_file = os.environ.get("AUTOAPPLY_HMAC_SECRET_FILE", "")
+        if secret_file:
+            try:
+                with open(secret_file, "r", encoding="utf-8") as f:
+                    raw = f.read().strip()
+            except OSError:
+                logger.error(f"Failed to read HMAC secret from {secret_file}")
+                raw = ""
     if not raw:
         raise HTTPException(
             status_code=503,

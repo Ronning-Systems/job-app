@@ -144,6 +144,23 @@ def test_post_sessions_rejects_when_secret_unset(client, monkeypatch):
     assert "AUTOAPPLY_HMAC_SECRET" in r.json()["detail"]
 
 
+def test_post_sessions_reads_secret_from_file_when_env_unset(client, monkeypatch, tmp_path):
+    """The deploy wires the secret via AUTOAPPLY_HMAC_SECRET_FILE (a
+    mounted file) so it never appears in `docker inspect` output. When
+    the plain env var is unset, _hmac_secret must fall back to reading
+    that file, or every authenticated route 503s in the real stack.
+    """
+    secret_file = tmp_path / "hmac_secret"
+    secret_file.write_text(TEST_SECRET)
+    # Bypass the autouse fixture: unset the env var, point _FILE at a file.
+    monkeypatch.delenv("AUTOAPPLY_HMAC_SECRET")
+    monkeypatch.setenv("AUTOAPPLY_HMAC_SECRET_FILE", str(secret_file))
+    r = client.post("/sessions", headers=_sign(b""), content=b"")
+    assert r.status_code == 200
+    body = r.json()
+    assert "id" in body and len(body["id"]) >= 16
+
+
 # ---------------------------------------------------------------------------
 # /sessions (auth + happy path)
 # ---------------------------------------------------------------------------
