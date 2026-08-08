@@ -21,11 +21,34 @@ has stated explicitly. Read this before taking action that might conflict.
 ## Deploy workflow — owned by `my-stack`, not this repo
 
 **This repo (`job-app`) is the application source. It does not contain
-the deploy orchestrator.** The canonical deploy is
-`my-stack/deploy-patrick-mini.sh`, which builds the image on
-`patrick-mini` via `docker buildx`, renders the Traefik config and the
-five compose stacks with `envsubst`, and brings them up with
+the deploy orchestrator.** The canonical deploys are
+`my-stack/deploy-patrick-mini.sh` (prod) and
+`my-stack/deploy-patrick-mini-test.sh` (test). Both build the image
+on `patrick-mini` via `docker buildx` and bring the env up with
 `docker compose -p <name> up -d`.
+
+Before 2026-08-03 the test deploy was a `--test` flag on the prod
+script. The flag was removed because the shared code path let a
+broken test deploy clobber the prod Traefik routing (Pitfall #25).
+Now the test env has its own Traefik instance, its own compose
+network (`proxy-test`, separate from prod's `proxy`), and its own
+deploy script. See `my-stack/AGENTS.md` for the full architecture
+notes.
+
+### Test-env network topology
+
+The test stack attaches to TWO Docker networks:
+
+- `proxy-test` — created by `my-stack/portainer/stacks/network-test.yml`.
+  Carries the test Traefik + all 5 test services. Test-side DNS
+  isolation: api-test cannot resolve prod's services by name.
+- `proxy` — the SHARED prod network. Only `secrets-fetcher-test`
+  attaches here, because it needs to reach the shared Vault
+  container at `http://vault:8200`. The vault token file at
+  `/srv/jobapp/vault/jobapp.token` is also shared between envs
+  (chmod 644, root-owned, written by both deploy scripts).
+
+Locked in by `backend/tests/test_compose.py::test_uses_external_proxy_network`.
 
 To redeploy after edits to `job-app`:
 
@@ -36,8 +59,11 @@ git merge --allow-unrelated-histories -X theirs job-app/main
 git checkout HEAD -- AGENTS.md .gitignore   # restore ops-only overrides
 git commit -m "Sync app code from job-app@<sha>"
 
-# 2. Deploy (from my-stack/):
+# 2a. Deploy prod (from my-stack/):
 ./deploy-patrick-mini.sh
+
+# 2b. OR deploy test (from my-stack/):
+./deploy-patrick-mini-test.sh
 ```
 
 ### Cloud Run is retired
@@ -46,14 +72,21 @@ GCP / Cloud Run is **no longer a deploy target**. The Cloud Run scripts
 (`deploy.sh`, `deploy-setup.sh`, `migrate-traffic.sh`, `rollback.sh`,
 `status.sh`), `cloudbuild.yaml`, and `DEPLOYMENT.md` have been removed
 from this repo. If they resurface after a sync, delete them again —
-they are stale. The canonical deploy path is `deploy-patrick-mini.sh`
-in `my-stack`, full stop. See `my-stack/AGENTS.md` for the authoritative
-ops conventions.
+they are stale. The canonical deploy paths are
+`deploy-patrick-mini.sh` (prod) and `deploy-patrick-mini-test.sh`
+(test) in `my-stack`, full stop. See `my-stack/AGENTS.md` for the
+authoritative ops conventions.
 
 ### Production URL
 
-- Public: `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
-- Tailscale-only fallback: `https://job-app.patrick-mini.ts.net`
+- Public (prod): `https://joblign.ronning.systems` (Traefik + Let's Encrypt)
+- Tailscale-only fallback (prod): `https://job-app.patrick-mini.ts.net`
+- Tailscale-only (test): `https://joblign.test.ronning.systems:9444/` — **must be
+  on the tailnet to reach** (test Traefik binds ONLY to the Tailscale
+  interface at the host level, on non-standard port :9444 because
+  the prod Traefik owns :80/:443 on this host; no public DNS, no
+  Let's Encrypt). Resolves via Tailscale split-DNS to `patrick-mini`'s
+  Tailscale IP.
 
 ## Database migrations — Alembic
 
@@ -123,10 +156,10 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   fetcher sidecar (Playwright+chromium) for blocked boards (LinkedIn,
   Indeed).
 - **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
-  headless-browser sidecar. The sidecar itself is owned by `my-stack`
-  (`portainer/stacks/fetcher.yml`), not this repo — this repo just calls
-  it. Internal-only; not exposed by Traefik. The 4-stack deploy became 5
-  (network → traefik → fetcher → vault → jobapp).
+  headless-browser sidecar. The sidecar itself lives in this repo
+  (`sidecars/fetcher/`); the my-stack deploy script builds and brings
+  it up but doesn't define its behavior. Internal-only; not exposed
+  by Traefik.
 - **Parser extensions** in `backend/job_parser.py`:
   `_extract_pay_range`, `_extract_application_deadline`, improved
   `_extract_credentials`. Structured pay range (`pay_range_min/max`,
@@ -134,3 +167,42 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   the `Job` and are sortable; no deadline reminders/badges in v1.
 - **Sort-by-attribute:** `GET /api/jobs?sort=company|position|location|
   stage|applied_date|deadline|pay|created&order=asc|desc`.
+
+## Sidecars (added 2026-07-28)
+
+- **Layout:** `sidecars/{fetcher,autoapply}/` — each is a
+  self-contained subproject with Dockerfile, source, and (where
+  applicable) tests. See `sidecars/README.md` for the build
+  contract.
+- **Build:** the my-stack deploy script rsyncs each subdir to
+  patrick-mini and runs `docker buildx build` in it. Image names
+  are `jobapp-<name>:${IMAGE_TAG}`.
+- **Runtime:** declared in this repo's `docker-compose.yml`
+  (prod) and `docker-compose.test.yml` (test) as services on
+  the external `proxy` network. The my-stack deploy script
+  brings them up as part of the `jobapp` (prod) or `jobapp-test`
+  (test) compose project. The test compose uses `-test`
+  suffixes on every service + container_name so prod and test
+  can run in parallel on the same `proxy` network without DNS
+  collisions.
+- **Auth:** fetcher has no auth (callable only from the internal
+  proxy network). Auto-apply uses HMAC-SHA256; the secret is
+  materialized by the my-stack deploy script and mounted as a
+  Docker secret into both the sidecar and the api container.
+- **Health:** every sidecar exposes `GET /healthz` (unauth).
+  `GET /api/health/system` on the api service probes every
+  sidecar + postgres + ollama and returns one 200/503 the
+  deploy script polls. Adding a new sidecar = add a Dockerfile +
+  service in compose + probe in `backend/health.py`.
+
+## Health rollup endpoint
+
+`GET /api/health/system` (added 2026-07-28) runs every registered
+probe concurrently and returns 200 with `{"overall":"ok", ...}` if
+all components are healthy, or 503 with `{"overall":"degraded", ...}`
+if any are down. The shallow `GET /api/health` endpoint stays for
+backward compat with the Traefik healthcheck.
+
+Probes live in `backend/health.py` and are registered in the
+`PROBES` dict there. Each probe returns `(status, detail)`. Adding
+a new sidecar = add `_probe_<name>` + an entry in `PROBES`.

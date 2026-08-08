@@ -1,0 +1,207 @@
+# Joblign + sidecars compose.
+#
+# Single compose project for the joblign stack: postgres,
+# secrets-fetcher, fetcher (URL rendering), auto-apply, and the
+# api service. Brings everything up as one unit instead of three
+# my-stack projects.
+#
+# The my-stack deploy script (deploy-patrick-mini.sh) is
+# responsible for:
+#   - building the job-app, jobapp-fetcher, jobapp-auto-apply, and
+#     jobapp-secrets-fetcher images on patrick-mini (via
+#     `docker buildx build` in each build context)
+#   - creating the external `proxy` Docker network (one-time setup)
+#   - materializing the autoapply_hmac_secret file on the host
+#   - substituting ${IMAGE_TAG} below (envsubst whitelist in
+#     deploy-patrick-mini.sh's render_compose)
+#   - bringing the whole stack up with
+#     `docker compose -p ${COMPOSE_PROJECT_NAME} up -d`
+#
+# NOT exposed publicly via Traefik for the sidecars — they live
+# only on the `proxy` network and are reachable from other
+# `proxy`-attached containers (api) by service name. The api
+# service is reachable from Traefik via the dynamic file
+# provider in portainer/traefik.dynamic.yml (no Traefik labels
+# here — Docker Desktop on WSL2 doesn't reliably expose the
+# Docker socket to Traefik's Docker provider).
+#
+# Image names: every service in this compose is built from a
+# build context owned by the job-app repo. The my-stack deploy
+# script rsyncs each build context to /srv/jobapp/<ctx>-img/ on
+# patrick-mini before building. The context mapping is:
+#   api:             Dockerfile at job-app repo root
+#   secrets-fetcher: portainer/secrets/ (stays in my-stack —
+#                    Vault bootstrap, not a job-app sidecar)
+#   fetcher:         sidecars/fetcher/ in this repo
+#   auto-apply:      sidecars/autoapply/ in this repo
+
+x-api-image: &api-image job-app:${IMAGE_TAG:-local}
+x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
+x-autoapply-image: &autoapply-image jobapp-auto-apply:${IMAGE_TAG:-local}
+x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobapp-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: jobapp
+      POSTGRES_USER: jobapp
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+      - pg_password
+    volumes:
+      - /srv/jobapp/postgres:/var/lib/postgresql/data
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  secrets-fetcher:
+    image: *secrets-fetcher-image
+    container_name: jobapp-secrets-fetcher
+    restart: "no"
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      SECRET_PATH: "jobapp/prod"
+      OUT_DIR: "/secrets/env"
+    secrets:
+      - vault_token
+    volumes:
+      - jobapp-secrets:/secrets
+    networks:
+      - proxy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+
+  fetcher:
+    image: *fetcher-image
+    container_name: jobapp-fetcher
+    restart: unless-stopped
+    mem_limit: 512m
+    # Same posture as the original my-stack fetcher.yml: read-only
+    # root fs, tmpfs /tmp for chromium scratch, no-new-privileges,
+    # all caps dropped. Chromium is launched with
+    # --disable-dev-shm-usage (see sidecars/fetcher/fetcher.py) so
+    # the 64MB default /dev/shm doesn't OOM on large pages.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  auto-apply:
+    image: *autoapply-image
+    container_name: jobapp-auto-apply
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1
+    environment:
+      # HMAC secret is mounted as a file (not a raw env var) so
+      # it never appears in `docker inspect` output. The my-stack
+      # deploy script materializes this file from a 48-char base64
+      # secret on first deploy and preserves it on subsequent
+      # deploys so manual rotation survives.
+      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
+    secrets:
+      - autoapply_hmac_secret
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api:
+    image: *api-image
+    container_name: jobapp
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      # Same HMAC secret file as the auto-apply sidecar; both
+      # containers read the same shared secret. The api uses it
+      # to sign outbound requests to the sidecar; the sidecar
+      # uses it to verify them.
+      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
+      AUTOAPPLY_URL: "http://auto-apply:8081"
+      FETCHER_URL: "http://fetcher:8080"
+    secrets:
+      - autoapply_hmac_secret
+    # Source env from materialized .env files written by secrets-fetcher.
+    # Use a for-loop because '. /secrets/env/*.env' only sources the
+    # first file matching the glob (the . builtin takes a single
+    # filename arg). $$f is docker-compose's escape for $f — compose
+    # processes $VAR references in command strings, so we need $$ to
+    # get a literal $.
+    entrypoint:
+      - sh
+      - -c
+      - "set -a; for f in /secrets/env/*.env; do . \"$$f\"; done; set +a; exec uvicorn backend.main:app --host 0.0.0.0 --port 8080"
+    volumes:
+      - jobapp-secrets:/secrets:ro
+    networks:
+      - proxy
+    depends_on:
+      postgres:
+        condition: service_healthy
+      secrets-fetcher:
+        condition: service_completed_successfully
+      fetcher:
+        condition: service_healthy
+      auto-apply:
+        condition: service_healthy
+    # Routing is defined in portainer/traefik.dynamic.yml (file
+    # provider), NOT via Traefik labels — Docker Desktop on WSL2
+    # doesn't reliably expose the Docker socket to Traefik's
+    # Docker provider.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  proxy:
+    external: true
+    name: proxy
+
+volumes:
+  jobapp-secrets:
+
+secrets:
+  vault_token:
+    file: /srv/jobapp/vault/jobapp.token
+  pg_password:
+    file: /srv/jobapp/secrets/pg_password
+  autoapply_hmac_secret:
+    file: /srv/jobapp/secrets/autoapply_hmac_secret

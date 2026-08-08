@@ -51,10 +51,12 @@ from job_parser import JobParser
 from agents import agent_service
 from auth import get_current_user
 from ssrf import is_url_safe
+from health import router as health_router
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Joblign API")
+app.include_router(health_router)
 
 # CORS
 CORS_ORIGINS = os.getenv("CORS_ORIGIN", "http://localhost:8765,https://joblign.ronning.systems").split(",")

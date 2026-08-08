@@ -722,6 +722,24 @@
         font-size: 1rem; font-weight: 600; transition: background 0.2s;
     }
     .auth-modal .btn-login-modal:hover { background: #4338ca; }
+
+    /* Test account picker styles */
+    .account-picker { margin-top: 16px; }
+    .account-picker label { display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 8px; }
+    .account-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 8px; }
+    .account-btn {
+        padding: 10px 8px; border: 2px solid var(--gray-300);
+        border-radius: 8px; background: white; color: var(--gray-700);
+        cursor: pointer; font-size: 0.85rem; font-weight: 600;
+        transition: all 0.2s; text-align: center;
+    }
+    .account-btn:hover { border-color: var(--primary); background: #f0f0ff; }
+    .account-btn.selected { border-color: var(--primary); background: var(--primary); color: white; }
+    .test-badge {
+        display: inline-block; background: #22c55e; color: white;
+        font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
+        margin-left: 8px; font-weight: 600; vertical-align: middle;
+    }
     </style>
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
@@ -738,7 +756,15 @@
         <div class="auth-modal">
             <h2>Joblign</h2>
             <p>Get aligned for success</p>
-            <button class="btn-login-modal" onclick="login()">Sign In</button>
+
+            <!-- Auth0 login (production) -->
+            <button class="btn-login-modal" id="btn-auth0-login" onclick="login()">Sign In</button>
+
+            <!-- Test account picker (when auth_disabled=true) -->
+            <div class="account-picker" id="account-picker" style="display: none;">
+                <label>Select Test Account <span class="test-badge">TEST</span></label>
+                <div class="account-grid" id="account-grid"></div>
+            </div>
         </div>
     </div>
     <!-- Header -->
@@ -1624,10 +1650,37 @@ The AI will automatically extract:
             : 'http://localhost:8765/api';
 
         // ─── Auth0 Configuration ───
-        const AUTH0_DOMAIN = 'auth.ronning.systems';
-        const AUTH0_CLIENT_ID = 'sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8';
-        const AUTH0_AUDIENCE = 'https://jobsync/api';
+        // The Auth0 values below are envsubst'd at deploy time by
+        // my-stack/deploy-patrick-mini.sh. The source-of-truth defaults
+        // in the fallback constants below are only used when the api is
+        // run without envsubst (e.g. local `run_local_docker.sh` without
+        // the envsubst pass). The deploy script's envsubst pass replaces
+        // each ${AUTH0_*} with the per-env value from the active
+        // .env.patrick-mini[.test]. To change the deployed frontend's
+        // Auth0 wiring, edit the matching AUTH0_* field in
+        // .env.patrick-mini (prod) or .env.patrick-mini.test (test) —
+        // NOT this file.
+        const AUTH0_DOMAIN = '${AUTH0_DOMAIN}';
+        const AUTH0_CLIENT_ID = '${AUTH0_CLIENT_ID}';
+        const AUTH0_AUDIENCE = '${AUTH0_AUDIENCE}';
+        // Local-dev fallbacks used when envsubst has not run (the values
+        // above still start with '${'). Match what run_local_docker.sh
+        // passes as AUTH0_DOMAIN by default (the test tenant) so a
+        // developer's local docker run is the closest analogue to the
+        // test env. Prod deploys always have envsubst'd these, so the
+        // fallback is unreachable in prod.
+        const _AUTH0_DOMAIN_FALLBACK = 'dev-saxftot48835pavp.us.auth0.com';
+        const _AUTH0_CLIENT_ID_FALLBACK = 'sxWuSb9zcYbCv2Rwp1hEFbUNjgCyiUx8';
+        const _AUTH0_AUDIENCE_FALLBACK = 'https://jobsync/api';
         const AUTH0_REDIRECT_URI = window.location.origin;
+        // If envsubst did not run (local dev), the AUTH0_* constants above
+        // still start with '${' and would break the Auth0 SDK. Substitute
+        // the local-dev fallbacks in that case. The deploy script's
+        // envsubst pass replaces these with per-env values, so this branch
+        // is unreachable in any deployed env.
+        const AUTH0_DOMAIN_RESOLVED = AUTH0_DOMAIN.startsWith('${') ? _AUTH0_DOMAIN_FALLBACK : AUTH0_DOMAIN;
+        const AUTH0_CLIENT_ID_RESOLVED = AUTH0_CLIENT_ID.startsWith('${') ? _AUTH0_CLIENT_ID_FALLBACK : AUTH0_CLIENT_ID;
+        const AUTH0_AUDIENCE_RESOLVED = AUTH0_AUDIENCE.startsWith('${') ? _AUTH0_AUDIENCE_FALLBACK : AUTH0_AUDIENCE;
 
         let auth0Client = null;
         let currentUser = null;
@@ -1641,21 +1694,65 @@ The AI will automatically extract:
                 const res = await fetch('/api/health');
                 const data = await res.json().catch(() => ({}));
                 if (data.auth_disabled) {
-                    currentUser = {
-                        sub: 'local-dev',
-                        name: 'Local Dev',
-                        email: 'dev@localhost',
-                        picture: '',
-                    };
-                    document.getElementById('auth-overlay').style.display = 'none';
-                    updateAuthUI();
-                    initApp();
-                    return;
+                    // Test mode: show account picker instead of Auth0 login.
+                    const savedAccountId = localStorage.getItem('test_account_id');
+                    buildAccountPicker(savedAccountId ? parseInt(savedAccountId, 10) : 1);
+                    document.getElementById('btn-auth0-login').style.display = 'none';
+                    return; // Don't auto-load — wait for account selection.
                 }
             } catch (err) {
                 console.warn('Health check failed, falling back to Auth0:', err);
             }
             await initAuth();
+        }
+
+        // ─── Test Account Picker ───
+        function buildAccountPicker(selectedId) {
+            const picker = document.getElementById('account-picker');
+            const grid = document.getElementById('account-grid');
+            picker.style.display = 'block';
+            grid.innerHTML = '';
+
+            for (let i = 1; i <= 10; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'account-btn' + (i === selectedId ? ' selected' : '');
+                btn.textContent = `Account ${i}`;
+                btn.onclick = () => selectTestAccount(i);
+                grid.appendChild(btn);
+            }
+
+            // Auto-select from URL query param or localStorage
+            const urlParams = new URLSearchParams(window.location.search);
+            const accountFromUrl = parseInt(urlParams.get('account'), 10);
+            if (accountFromUrl && accountFromUrl >= 1 && accountFromUrl <= 10) {
+                selectTestAccount(accountFromUrl);
+            } else if (selectedId && selectedId >= 1 && selectedId <= 10) {
+                selectTestAccount(selectedId);
+            }
+        }
+
+        function selectTestAccount(accountId) {
+            // Update button selection styling
+            document.querySelectorAll('.account-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', idx + 1 === accountId);
+            });
+
+            // Persist selection and navigate
+            localStorage.setItem('test_account_id', accountId.toString());
+            const url = new URL(window.location);
+            url.searchParams.set('account', accountId.toString());
+            window.history.replaceState({}, '', url);
+
+            // Log in as this test account and load the app
+            currentUser = {
+                sub: `test-account-${accountId}`,
+                name: `Test User ${accountId}`,
+                email: `test${accountId}@joblign.test`,
+                picture: '',
+            };
+            document.getElementById('auth-overlay').style.display = 'none';
+            updateAuthUI();
+            initApp();
         }
 
         async function initAuth() {
@@ -1667,11 +1764,11 @@ The AI will automatically extract:
                 // fast and show the login overlay rather than freezing.
                 const initTimeoutMs = 15000;
                 const initPromise = window.auth0.createAuth0Client({
-                    domain: AUTH0_DOMAIN,
-                    clientId: AUTH0_CLIENT_ID,
+                    domain: AUTH0_DOMAIN_RESOLVED,
+                    clientId: AUTH0_CLIENT_ID_RESOLVED,
                     authorizationParams: {
                         redirect_uri: AUTH0_REDIRECT_URI,
-                        audience: AUTH0_AUDIENCE,
+                        audience: AUTH0_AUDIENCE_RESOLVED,
                         scope: 'openid profile email offline_access',
                     },
                     cacheLocation: 'localstorage',
@@ -2034,7 +2131,7 @@ The AI will automatically extract:
                                 <i class="fas fa-envelope-open-text"></i> View Cover Letter
                             </button>
                         ` : `
-                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="Create Cover Letter">
+                            <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateCoverLetter(${job.id})" title="Create Cover Letter">
                                 <i class="fas fa-magic"></i> Create Cover Letter
                             </button>
                         `}
@@ -2593,8 +2690,14 @@ The AI will automatically extract:
             });
         });
 
-        // Initial highlight
-        setFilter(currentFilter);
+        // Initial highlight — toggle the active stat card WITHOUT triggering
+        // a network fetch. setFilter() → renderJobs() → updateStats() →
+        // fetchStats() fires /api/stats, which 401s before Auth0 init
+        // completes (and again during the redirect callback when the page
+        // reloads with ?code=...). That unauthenticated request is the sign-in
+        // auth jitter. The real data + stats load happens inside initApp(),
+        // which runs only after auth succeeds.
+        document.querySelectorAll('.stat[data-filter]').forEach(s => s.classList.toggle('active', s.dataset.filter === currentFilter));
 
         // Close modals on overlay click
         jobModal.addEventListener('click', (e) => {
@@ -4095,7 +4198,13 @@ The AI will automatically extract:
         let currentCoverLetterJobId = null;
 
         document.getElementById('btn-cover-letter-editor').addEventListener('click', () => {
-            if (currentCoverLetterJobId) openCoverLetterEditor(currentCoverLetterJobId);
+            if (!currentCoverLetterJobId) return;
+            const job = jobs.find(j => j.id === currentCoverLetterJobId);
+            if (job && job.has_cover_letter) {
+                openCoverLetterEditor(currentCoverLetterJobId);
+            } else {
+                generateCoverLetter(currentCoverLetterJobId);
+            }
         });
         document.getElementById('btn-close-cover-letter-editor').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));
         document.getElementById('btn-close-cover-letter-editor-footer').addEventListener('click', () => coverLetterEditorModal.classList.remove('active'));

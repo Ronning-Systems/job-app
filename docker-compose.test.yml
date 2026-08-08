@@ -1,0 +1,256 @@
+# Joblign + sidecars compose — TEST environment.
+#
+# Hand-maintained, sitting next to docker-compose.yml in this repo.
+# The prod and test envs run in parallel (both on the same `proxy`
+# Docker network) and must NOT collide on container names or
+# service names. To avoid the collision:
+#   - every service has `-test` appended to its service name
+#   - every container has `-test` appended to its container_name
+#   - the api's FETCHER_URL / AUTOAPPLY_URL reference the
+#     -test service names (http://fetcher-test:8080, etc.)
+#   - host volume paths live under /srv/jobapp-test/...
+#   - the Docker volume name is jobapp-test-secrets
+#   - the HMAC secret file is /srv/jobapp-test/secrets/autoapply_hmac_secret
+#
+# Same as prod:
+#   - the `proxy` Docker network (one network for all envs)
+#   - the Vault stack (one Vault for all envs; the test
+#     secrets-fetcher reads from a different KV path:
+#     secret/jobapp/test vs. secret/jobapp/prod for prod)
+#   - the image tags (jobapp:local, jobapp-fetcher:local, etc.)
+#   - the LE cert behavior (Traefik pulls certs on first HTTPS
+#     request to joblign.test.ronning.systems)
+#
+# The my-stack deploy script (deploy-patrick-mini.sh) renders this
+# file when DEPLOY_ENV=test, and renders docker-compose.yml when
+# DEPLOY_ENV is unset or DEPLOY_ENV=prod. Both files declare the
+# same five services; the only differences are names + paths.
+#
+# Traefik routes joblign.test.ronning.systems to http://jobapp-test:8080
+# via the jobapp-test router in portainer/traefik.dynamic.yml.
+
+x-api-image: &api-image job-app:${IMAGE_TAG:-local}
+x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
+x-autoapply-image: &autoapply-image jobapp-auto-apply:${IMAGE_TAG:-local}
+x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: jobapp-test-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    # Test env uses a SEPARATE postgres database name (jobapp_test,
+    # not jobapp) so a misconfigured DATABASE_URL can never silently
+    # route test-env queries into the prod schema. This is the
+    # defense-in-depth layer: even if the secrets-fetcher pulled
+    # the wrong DATABASE_URL into Vault (prod path instead of test
+    # path) and the api connected to prod postgres, postgres itself
+    # would reject the connection because the `jobapp_test` database
+    # doesn't exist there. Locked in by
+    # backend/tests/test_compose.py::test_test_compose_uses_separate_postgres_db.
+    environment:
+      POSTGRES_DB: jobapp_test
+      POSTGRES_USER: jobapp
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+      - pg_password
+    volumes:
+      - /srv/jobapp-test/postgres:/var/lib/postgresql/data
+    networks:
+      - proxy-test
+    healthcheck:
+      # Healthcheck targets jobapp_test (the new test DB name). If
+      # the test compose ever gets a fresh data dir, the init step
+      # only creates the DB named in POSTGRES_DB above; the
+      # healthcheck's -d flag must match that name or pg_isready
+      # returns "database does not exist" and the api's depends_on
+      # never resolves, leaving the stack in a restart loop.
+      test: ["CMD-SHELL", "pg_isready -U jobapp -d jobapp_test"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  secrets-fetcher-test:
+    image: *secrets-fetcher-image
+    container_name: jobapp-test-secrets-fetcher
+    restart: "no"
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      # Different Vault KV path from prod (which uses jobapp/prod).
+      # Both paths are readable by the same jobapp policy token.
+      SECRET_PATH: "jobapp/test"
+      OUT_DIR: "/secrets/env"
+    secrets:
+      - vault_token
+    volumes:
+      - jobapp-test-secrets:/secrets
+    # secrets-fetcher-test attaches to BOTH proxy-test AND proxy:
+    #   - proxy-test: to be reachable by api-test on the test env's
+    #     Docker DNS (api-test depends on it to get its secret env)
+    #   - proxy: to reach the shared vault container at
+    #     http://vault:8200 (vault lives on the prod network; only
+    #     this one test-env service has the cross-mount).
+    # Without both, the secrets-fetcher can't pull from vault and
+    # the api won't get its env vars. This is the one intentional
+    # cross-network attachment in the test stack.
+    networks:
+      - proxy-test
+      - proxy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+
+  fetcher-test:
+    image: *fetcher-image
+    container_name: jobapp-test-fetcher
+    restart: unless-stopped
+    mem_limit: 512m
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    networks:
+      - proxy-test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  auto-apply-test:
+    image: *autoapply-image
+    container_name: jobapp-test-auto-apply
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1
+    environment:
+      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
+    secrets:
+      - autoapply_hmac_secret
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    networks:
+      - proxy-test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api-test:
+    image: *api-image
+    container_name: jobapp-test
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      # Same HMAC secret file as the auto-apply sidecar; both
+      # containers read the same shared secret (materialized by
+      # the deploy script at /srv/jobapp-test/secrets/autoapply_hmac_secret
+      # for the test env). The api uses it to sign outbound
+      # requests; the sidecar uses it to verify them.
+      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
+      # Sidecar URLs use the -test service names (per the proxy
+      # network's service DNS). The api container's /api/health/system
+      # rollup endpoint probes these same URLs.
+      AUTOAPPLY_URL: "http://auto-apply-test:8081"
+      FETCHER_URL: "http://fetcher-test:8080"
+      # Disable Auth0 on test so the SPA skips login entirely and
+      # uses a local-dev user.  The frontend also supports an
+      # ACCOUNT_ID query param (1-10) to pick which test profile to
+      # use, enabling dispersed sample data across multiple profiles.
+      AUTH_DISABLED: "true"
+      # Optional: set to 1-10 to pin a specific test account. When
+      # omitted, the frontend shows an account picker so users can
+      # choose which of 10 test profiles to use.
+      ACCOUNT_ID: ""
+      # Override the Auth0 settings so the api uses the Test
+      # Application in Auth0 (created for this env). The prod
+      # values come from secret/jobapp/prod via the
+      # secrets-fetcher; the test values come from
+      # secret/jobapp/test. The test secrets-fetcher writes them
+      # to the same /secrets/env/ volume, so the entrypoint
+      # below sources them automatically — we just need to make
+      # sure the test Vault path has the Test Application's
+      # AUTH0_DOMAIN, AUTH0_AUDIENCE, AUTH0_ISSUERS, etc.
+    secrets:
+      - autoapply_hmac_secret
+    entrypoint:
+      - sh
+      - -c
+      - "set -a; for f in /secrets/env/*.env; do . \"$$f\"; done; set +a; exec uvicorn backend.main:app --host 0.0.0.0 --port 8080"
+    volumes:
+      - jobapp-test-secrets:/secrets:ro
+    networks:
+      - proxy-test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      secrets-fetcher-test:
+        condition: service_completed_successfully
+      fetcher-test:
+        condition: service_healthy
+      auto-apply-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  # proxy-test is the test-env-only Docker network, created by
+  # my-stack/portainer/stacks/network-test.yml. All test-env
+  # services attach to this. The test Traefik (also on this
+  # network) routes joblign.test.ronning.systems to the api-test
+  # container.
+  proxy-test:
+    external: true
+    name: proxy-test
+  # proxy is the SHARED Docker network (created by the prod deploy).
+  # Only secrets-fetcher-test attaches to this — it needs to reach
+  # the vault container, which is shared with prod and lives on
+  # the prod network. No other test-env service attaches to
+  # proxy; the test env cannot reach prod's api, postgres, or
+  # sidecars by Docker DNS name (DNS isolation, see
+  # my-stack/AGENTS.md "Architecture" section).
+  proxy:
+    external: true
+    name: proxy
+
+volumes:
+  jobapp-test-secrets:
+
+secrets:
+  vault_token:
+    # Same Vault token as prod — the jobapp policy grants
+    # read on secret/data/jobapp/* which covers both
+    # jobapp/prod and jobapp/test. No need for a separate
+    # token per env.
+    file: /srv/jobapp/vault/jobapp.token
+  pg_password:
+    # Test env has its own pg_password so a rotation in the
+    # test env doesn't accidentally rotate prod, and vice
+    # versa. The deploy script materializes this at
+    # /srv/jobapp-test/secrets/pg_password on every test
+    # deploy.
+    file: /srv/jobapp-test/secrets/pg_password
+  autoapply_hmac_secret:
+    # Separate HMAC secret per env so prod + test sidecars
+    # don't share auth.
+    file: /srv/jobapp-test/secrets/autoapply_hmac_secret
