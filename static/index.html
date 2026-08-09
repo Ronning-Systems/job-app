@@ -1817,12 +1817,36 @@ The AI will automatically extract:
         const AUTH0_REDIRECT_URI = window.location.origin;
         // If envsubst did not run (local dev), the AUTH0_* constants above
         // still start with '${' and would break the Auth0 SDK. Substitute
-        // the local-dev fallbacks in that case. The deploy script's
-        // envsubst pass replaces these with per-env values, so this branch
-        // is unreachable in any deployed env.
-        const AUTH0_DOMAIN_RESOLVED = AUTH0_DOMAIN.startsWith('${') ? _AUTH0_DOMAIN_FALLBACK : AUTH0_DOMAIN;
-        const AUTH0_CLIENT_ID_RESOLVED = AUTH0_CLIENT_ID.startsWith('${') ? _AUTH0_CLIENT_ID_FALLBACK : AUTH0_CLIENT_ID;
-        const AUTH0_AUDIENCE_RESOLVED = AUTH0_AUDIENCE.startsWith('${') ? _AUTH0_AUDIENCE_FALLBACK : AUTH0_AUDIENCE;
+        // the local-dev fallbacks in that case. Also catch the case where
+        // envsubst ran with the var unset, which leaves an empty string
+        // (NOT a placeholder) — without this guard, the SDK would build
+        // a malformed authorization URL like `https:///authorize?...`
+        // that Safari surfaces as "Safari Can't Open the Page" with
+        // host=authorize. The deploy script's envsubst pass replaces
+        // these with per-env values, so this branch is unreachable in
+        // any deployed env.
+        const AUTH0_DOMAIN_RESOLVED = (AUTH0_DOMAIN.startsWith('${') || !AUTH0_DOMAIN.trim()) ? _AUTH0_DOMAIN_FALLBACK : AUTH0_DOMAIN;
+        const AUTH0_CLIENT_ID_RESOLVED = (AUTH0_CLIENT_ID.startsWith('${') || !AUTH0_CLIENT_ID.trim()) ? _AUTH0_CLIENT_ID_FALLBACK : AUTH0_CLIENT_ID;
+        const AUTH0_AUDIENCE_RESOLVED = (AUTH0_AUDIENCE.startsWith('${') || !AUTH0_AUDIENCE.trim()) ? _AUTH0_AUDIENCE_FALLBACK : AUTH0_AUDIENCE;
+
+        // Last-line-of-defense guard: if the resolved domain is still empty
+        // after the fallback substitution, fail loud rather than feed an
+        // empty domain to createAuth0Client (which produces the malformed
+        // https:///authorize/?... URL that Safari can't open).
+        if (!AUTH0_DOMAIN_RESOLVED || !AUTH0_CLIENT_ID_RESOLVED) {
+            console.error('[auth] AUTH0_DOMAIN or AUTH0_CLIENT_ID is empty after envsubst + fallback. Check that .env.patrick-mini[.test] has all AUTH0_* values set.', {
+                AUTH0_DOMAIN,
+                AUTH0_CLIENT_ID,
+                AUTH0_DOMAIN_RESOLVED,
+                AUTH0_CLIENT_ID_RESOLVED,
+            });
+            document.getElementById('auth-overlay').style.display = 'flex';
+            const container = document.getElementById('auth-container');
+            if (container) {
+                container.innerHTML = `<div style="color: var(--danger); font-size: 0.85rem; padding: 12px; text-align: center;">Auth is not configured on this build. Set AUTH0_DOMAIN and AUTH0_CLIENT_ID in the deploy environment.</div>`;
+            }
+            throw new Error('AUTH0_DOMAIN or AUTH0_CLIENT_ID is empty');
+        }
 
         let auth0Client = null;
         let currentUser = null;
