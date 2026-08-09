@@ -206,6 +206,32 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .card-header:hover {
+            background: var(--gray-50);
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title .chevron {
+            font-size: 0.8rem;
+            color: var(--gray-500);
+            transition: transform 0.2s;
+        }
+
+        .card.collapsed .card-title .chevron {
+            transform: rotate(-90deg);
+        }
+
+        .card.collapsed .card-content {
+            display: none;
         }
 
         .card-header h2 {
@@ -876,24 +902,46 @@
         </div>
 
         <div class="grid">
-            <!-- Active Applications -->
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-rocket"></i> Active Applications</h2>
-                    <span class="count" id="active-count">8</span>
+            <!-- Saved Applications -->
+            <div class="card" id="saved-card">
+                <div class="card-header" data-toggle="saved">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-bookmark"></i> Saved</h2>
+                    </div>
+                    <span class="count" id="saved-count">0</span>
                 </div>
                 <div class="card-content">
-                    <div class="job-list" id="activeJobs">
+                    <div class="job-list" id="savedJobs">
+                        <!-- Job items will be populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- In Progress Applications -->
+            <div class="card" id="inprogress-card">
+                <div class="card-header" data-toggle="inprogress">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-rocket"></i> In Progress</h2>
+                    </div>
+                    <span class="count" id="inprogress-count">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="inprogressJobs">
                         <!-- Job items will be populated by JS -->
                     </div>
                 </div>
             </div>
 
             <!-- Archived Applications -->
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-archive"></i> Archived</h2>
-                    <span class="count" id="archived-count">4</span>
+            <div class="card collapsed" id="archived-card">
+                <div class="card-header" data-toggle="archived">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-archive"></i> Archived</h2>
+                    </div>
+                    <span class="count" id="archived-count">0</span>
                 </div>
                 <div class="card-content">
                     <div class="job-list" id="archivedJobs">
@@ -2119,43 +2167,58 @@ The AI will automatically extract:
 
         // Render jobs
         function renderJobs() {
-            const activeContainer = document.getElementById('activeJobs');
+            const savedContainer = document.getElementById('savedJobs');
+            const inprogressContainer = document.getElementById('inprogressJobs');
             const archivedContainer = document.getElementById('archivedJobs');
-            const activeCard = activeContainer.closest('.card');
-            const archivedCard = archivedContainer.closest('.card');
+            const savedCard = document.getElementById('saved-card');
+            const inprogressCard = document.getElementById('inprogress-card');
+            const archivedCard = document.getElementById('archived-card');
 
-            // Active pipeline: everything before a final disposition.
-            // Archived/dispositioned: rejected, withdrawn, closed, not_pursuing.
-            const activeJobsAll = jobs.filter(j =>
-                ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
+            // Saved: not yet applied.
+            const savedJobsAll = jobs.filter(j => j.stage === 'saved');
+            // In progress: applied and moving through the pipeline.
+            const inprogressJobsAll = jobs.filter(j =>
+                ['applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
             );
+            // Archived/dispositioned: rejected, withdrawn, closed, not_pursuing.
             const archivedJobsAll = jobs.filter(j =>
                 ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(j.stage)
             );
 
             // Apply selected filter to decide which list(s) to show and what goes in them.
-            let activeJobs = [];
+            let savedJobs = [];
+            let inprogressJobs = [];
             let archivedJobs = [];
 
             if (currentFilter === 'all') {
-                activeJobs = activeJobsAll;
+                savedJobs = savedJobsAll;
+                inprogressJobs = inprogressJobsAll;
                 archivedJobs = archivedJobsAll;
             } else if (currentFilter === 'active') {
-                activeJobs = activeJobsAll.filter(j => ['saved', 'applied', 'phone_screen', 'interview', 'executive_call'].includes(j.stage));
+                savedJobs = savedJobsAll;
+                inprogressJobs = inprogressJobsAll;
             } else if (currentFilter === 'interview') {
-                activeJobs = activeJobsAll.filter(j => ['interview', 'executive_call'].includes(j.stage));
+                inprogressJobs = inprogressJobsAll.filter(j => ['interview', 'executive_call'].includes(j.stage));
             } else if (currentFilter === 'offer') {
-                activeJobs = activeJobsAll.filter(j => j.stage === 'offered');
+                inprogressJobs = inprogressJobsAll.filter(j => j.stage === 'offered');
             } else if (currentFilter === 'archived') {
                 archivedJobs = archivedJobsAll;
             }
 
-            // Render active
-            activeContainer.innerHTML = activeJobs.length ? activeJobs.map(job => renderJobItem(job)).join('') : `
+            // Render saved
+            savedContainer.innerHTML = savedJobs.length ? savedJobs.map(job => renderJobItem(job)).join('') : `
                 <div class="empty-state">
-                    <i class="fas fa-inbox"></i>
-                    <p>No active applications</p>
-                    ${activeJobsAll.length === 0 && archivedJobsAll.length === 0 ? renderFirstTimeGuide() : ''}
+                    <i class="fas fa-bookmark"></i>
+                    <p>No saved jobs</p>
+                    ${savedJobsAll.length === 0 && inprogressJobsAll.length === 0 && archivedJobsAll.length === 0 ? renderFirstTimeGuide() : ''}
+                </div>
+            `;
+
+            // Render in progress
+            inprogressContainer.innerHTML = inprogressJobs.length ? inprogressJobs.map(job => renderJobItem(job)).join('') : `
+                <div class="empty-state">
+                    <i class="fas fa-rocket"></i>
+                    <p>No jobs in progress</p>
                 </div>
             `;
 
@@ -2168,16 +2231,18 @@ The AI will automatically extract:
             `;
 
             // First-time user has no jobs anywhere — trigger welcome modal once.
-            if (activeJobsAll.length === 0 && archivedJobsAll.length === 0) {
+            if (savedJobsAll.length === 0 && inprogressJobsAll.length === 0 && archivedJobsAll.length === 0) {
                 maybeShowWelcomeModal();
             }
 
             // Show/hide cards based on current filter
-            if (activeCard) activeCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
+            if (savedCard) savedCard.style.display = (currentFilter === 'all' || currentFilter === 'active') ? '' : 'none';
+            if (inprogressCard) inprogressCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
             if (archivedCard) archivedCard.style.display = (currentFilter === 'all' || currentFilter === 'archived') ? '' : 'none';
 
             // Update counts
-            document.getElementById('active-count').textContent = activeJobs.length;
+            document.getElementById('saved-count').textContent = savedJobs.length;
+            document.getElementById('inprogress-count').textContent = inprogressJobs.length;
             document.getElementById('archived-count').textContent = archivedJobs.length;
 
             // Update stats
@@ -2193,6 +2258,14 @@ The AI will automatically extract:
             });
 
             attachStageSelectHandlers();
+
+            // Wire up collapsible section headers
+            document.querySelectorAll('.card-header[data-toggle]').forEach(header => {
+                header.addEventListener('click', (e) => {
+                    if (e.target.closest('.count')) return;
+                    header.closest('.card').classList.toggle('collapsed');
+                });
+            });
 
             // Wire up the inline "Add your first job" button in the empty-state
             // first-time guide (only present when the user has no jobs at all).
