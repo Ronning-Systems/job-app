@@ -64,7 +64,7 @@ JSON Output:"""
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
-                    "max_tokens": 2000,
+                    "max_tokens": 8000,
                 }
             else:
                 # Local Ollama: /api/generate
@@ -73,7 +73,8 @@ JSON Output:"""
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 2000},
+                    "format": "json",
+                    "options": {"temperature": 0.1, "num_predict": 8000},
                 }
 
             print(f"[OllamaClient] Sending request to {url} with model {self.model}")
