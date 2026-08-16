@@ -35,6 +35,24 @@ network (`proxy-test`, separate from prod's `proxy`), and its own
 deploy script. See `my-stack/AGENTS.md` for the full architecture
 notes.
 
+### Hotfix workflow — commit and push to main for small prod bugs
+
+For small production bug fixes (one or two file changes, no schema
+or migration), **commit and push directly to `main`** so the next
+prod deploy picks them up. Do not wait for a separate PR or test
+deploy — the goal is to unblock production.
+
+- Commit with a clear `fix(...):` prefix and a one-line body
+  explaining the symptom (so the next person reading the log knows
+  what was broken and why the change was safe).
+- Push to `origin main` immediately after the commit.
+- If `main` has diverged (e.g. commits ahead on a feature branch),
+  cherry-pick the fix onto `main` rather than merging — keep the
+  hotfix commit isolated and easy to revert.
+- For anything touching schema, auth, or deploy plumbing, stop and
+  ask; those go through the normal sync → my-stack → test → prod
+  path.
+
 ### Test-env network topology
 
 The test stack attaches to TWO Docker networks:
