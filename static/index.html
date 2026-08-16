@@ -1719,9 +1719,15 @@ The AI will automatically extract:
                 const data = await res.json().catch(() => ({}));
                 if (data.auth_disabled) {
                     // Test mode: show account picker instead of Auth0 login.
-                    const savedAccountId = localStorage.getItem('test_account_id');
-                    buildAccountPicker(savedAccountId ? parseInt(savedAccountId, 10) : 1);
+                    const savedRaw = localStorage.getItem('test_account_id');
+                    const savedAccountId = savedRaw ? parseInt(savedRaw, 10) : null;
+                    buildAccountPicker(savedAccountId);
                     document.getElementById('btn-auth0-login').style.display = 'none';
+                    // Show the overlay so the account picker is actually visible.
+                    // Without this, the overlay stays display:none (from the HTML
+                    // markup) and the picker — a child of the overlay — is invisible,
+                    // so a user would see neither the picker nor a login path.
+                    document.getElementById('auth-overlay').style.display = 'flex';
                     return; // Don't auto-load — wait for account selection.
                 }
             } catch (err) {
