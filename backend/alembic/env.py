@@ -1,7 +1,5 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-
 from alembic import context
 
 # this is the Alembic Config object, which provides
@@ -22,9 +20,15 @@ import models  # noqa: E402  (must come after config setup so logging is ready)
 
 target_metadata = models.Base.metadata
 
-# Pull the DB URL from the same place models.py does. Override via the
-# sqlalchemy.url key in alembic.ini (or -x sqlalchemy.url=...) if needed.
-config.set_main_option("sqlalchemy.url", str(models.engine.url))
+# We deliberately do NOT write sqlalchemy.url into the alembic config here.
+# The runtime connectable is models.engine (see run_migrations_online
+# below), which is created from the real DATABASE_URL. Putting the URL
+# into the INI section would hit two SQLAlchemy 2.x / configparser traps:
+#   1. str(url) masks the password to '***' → auth failure.
+#   2. render_as_string(hide_password=False) fails configparser's
+#      interpolation parser when the password contains an interpolation
+#      character (e.g. '%' or a bare '%40').
+# Bypassing the INI section and reusing models.engine avoids both.
 
 
 def run_migrations_offline() -> None:
@@ -33,7 +37,7 @@ def run_migrations_offline() -> None:
     Emits SQL to stdout without connecting to the DB. Useful for
     reviewing what a migration will do before applying it.
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = models.engine.url.render_as_string(hide_password=False)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -52,13 +56,7 @@ def run_migrations_online() -> None:
 
     Connects to the DB and applies the migrations in a transaction.
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
+    with models.engine.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
