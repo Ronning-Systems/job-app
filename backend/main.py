@@ -152,6 +152,8 @@ class JobResponse(BaseModel):
     resume_revisions: Optional[list] = []
     structured_content: Optional[dict] = None
     atoms_snapshot: Optional[list] = None
+    resume_id: Optional[int] = None
+    cover_letter_id: Optional[int] = None
     has_cover_letter: bool = False
     created_at: datetime
 
@@ -1316,10 +1318,12 @@ def format_job_response(
         "history": application.history or [],
         "generated_resume": generated_resume,
         "resume_revisions": resume_revisions,
+        "resume_id": latest_resume.id if latest_resume else None,
         "structured_content": latest_resume.structured_content if latest_resume else None,
         "atoms_snapshot": latest_resume.atoms_snapshot if latest_resume else None,
         "has_cover_letter": cover_letter is not None,
         "cover_letter": cover_letter,
+        "cover_letter_id": latest_cover_letter.id if latest_cover_letter else None,
         "cover_letter_revisions": cover_letter_revisions,
     }
 

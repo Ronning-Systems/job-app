@@ -1224,6 +1224,18 @@ The AI will automatically extract:
                         </select>
                     </div>
                 </div>
+                <div id="cover-letter-editor-scores" style="padding: 12px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+                        <span style="font-weight:600; color:var(--gray-700);"><i class="fas fa-chart-line"></i> ATS &amp; Panel Review</span>
+                        <button class="btn btn-secondary" onclick="loadScoresForEditor('cover_letter')" style="font-size:0.8rem; padding:4px 10px;">
+                            <i class="fas fa-chart-line"></i> Load scores
+                        </button>
+                        <button class="btn btn-primary" onclick="scoreAllForEditor('cover_letter')" style="font-size:0.8rem; padding:4px 10px;">
+                            <i class="fas fa-gavel"></i> Run ATS + Panel
+                        </button>
+                    </div>
+                    <div id="cover-letter-editor-scores-content" style="font-size:0.8rem; color:var(--gray-600);">No scores yet. Click "Run ATS + Panel" to score this cover letter.</div>
+                </div>
                 <textarea id="cover-letter-editor-content" style="flex: 1; width: 100%; padding: 16px; border: none; font-family: 'Georgia', serif; font-size: 11pt; line-height: 1.6; resize: none; outline: none; -webkit-overflow-scrolling: touch; background: white;"></textarea>
             </div>
             <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
@@ -1273,6 +1285,18 @@ The AI will automatically extract:
                             <!-- Populated dynamically by openResumeEditor() -->
                         </select>
                     </div>
+                </div>
+                <div id="resume-editor-scores" style="padding: 12px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+                        <span style="font-weight:600; color:var(--gray-700);"><i class="fas fa-chart-line"></i> ATS &amp; Panel Review</span>
+                        <button class="btn btn-secondary" onclick="loadScoresForEditor('resume')" style="font-size:0.8rem; padding:4px 10px;">
+                            <i class="fas fa-chart-line"></i> Load scores
+                        </button>
+                        <button class="btn btn-primary" onclick="scoreAllForEditor('resume')" style="font-size:0.8rem; padding:4px 10px;">
+                            <i class="fas fa-gavel"></i> Run ATS + Panel
+                        </button>
+                    </div>
+                    <div id="resume-editor-scores-content" style="font-size:0.8rem; color:var(--gray-600);">No scores yet. Click "Run ATS + Panel" to score this resume.</div>
                 </div>
                 <div style="display: flex; gap: 4px; padding: 8px 16px 0; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);">
                     <button id="resume-editor-tab-structured" class="resume-editor-tab active" type="button" style="padding: 6px 12px; font-size: 0.85rem; border: 1px solid var(--gray-300); border-bottom: none; border-radius: 6px 6px 0 0; background: white; color: var(--gray-800); cursor: pointer; margin-right: 2px;">
@@ -3999,6 +4023,9 @@ The AI will automatically extract:
             } else {
                 console.error('resume-editor-modal element not found');
             }
+
+            // Load the ATS + panel scores for this resume into the editor.
+            loadScoresForEditor('resume');
         };
 
         // Export resume to DOCX — now backed by the server-side composer
@@ -4297,6 +4324,9 @@ The AI will automatically extract:
             document.getElementById('cover-letter-editor-feedback').value = '';
 
             coverLetterEditorModal.classList.add('active');
+
+            // Load the ATS + panel scores for this cover letter into the editor.
+            loadScoresForEditor('cover_letter');
         }
 
         function updateCoverLetterButton(job) {
@@ -4671,23 +4701,13 @@ The AI will automatically extract:
                 if (!jr.ok) throw new Error('Could not load job');
                 const job = await jr.json();
                 const tasks = [];
-                if (job.generated_resume) {
-                    // resume_id is needed; the route takes it as a path param. We don't have it on the list response,
-                    // so use the from-URL of the latest. For simplicity, call the no-id variant by fetching first.
-                    const gr = await apiFetch(`${API_URL}/debug/resume/${jobId}`);
-                    if (gr.ok) {
-                        const dbg = await gr.json();
-                        const resumeId = dbg.id;
-                        if (resumeId) {
-                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats`, { method: 'POST' }));
-                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel`, { method: 'POST' }));
-                        }
-                    }
+                if (job.generated_resume && job.resume_id) {
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-ats`, { method: 'POST' }));
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-industry-panel`, { method: 'POST' }));
                 }
-                if (job.has_cover_letter) {
-                    // cover_letter_id unknown on list response; the GET detail returns has_cover_letter but not id.
-                    // Use the scores route's own logic by attempting the latest; for now poll the scores endpoint.
-                    // Simplification: call a no-id variant. Since routes require id, fall back to scores fetch.
+                if (job.has_cover_letter && job.cover_letter_id) {
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats`, { method: 'POST' }));
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel`, { method: 'POST' }));
                 }
                 await Promise.all(tasks.map(p => p.catch(() => null)));
                 content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
@@ -4740,6 +4760,50 @@ The AI will automatically extract:
             </div>`;
         }
 
+        // Load scores for a specific artifact type into the editor modal's
+        // scores section. artifactType is 'resume' or 'cover_letter'.
+        async function loadScoresForEditor(artifactType) {
+            const jobId = artifactType === 'cover_letter' ? currentCoverLetterJobId : currentEditingJobId;
+            if (!jobId) return;
+            const contentId = artifactType === 'cover_letter' ? 'cover-letter-editor-scores-content' : 'resume-editor-scores-content';
+            const content = document.getElementById(contentId);
+            if (!content) return;
+            content.innerHTML = '<em style="color:var(--gray-500)">Loading...</em>';
+            try {
+                const r = await apiFetch(`${API_URL}/jobs/${jobId}/scores?artifact_type=${artifactType}`);
+                if (!r.ok) throw new Error('Failed to load scores');
+                const scores = await r.json();
+                if (!scores.length) { content.innerHTML = '<span style="color:var(--gray-500)">No scores yet. Click "Run ATS + Panel" to score.</span>'; return; }
+                content.innerHTML = scores.map(s => renderScoreCard(s)).join('');
+            } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
+        // Run ATS + industry panel scoring for a specific artifact type and
+        // refresh the editor modal's scores section.
+        async function scoreAllForEditor(artifactType) {
+            const jobId = artifactType === 'cover_letter' ? currentCoverLetterJobId : currentEditingJobId;
+            if (!jobId) return;
+            const contentId = artifactType === 'cover_letter' ? 'cover-letter-editor-scores-content' : 'resume-editor-scores-content';
+            const content = document.getElementById(contentId);
+            if (!content) return;
+            content.innerHTML = '<em style="color:var(--gray-500)">Running ATS + industry panel... this runs in the background.</em>';
+            try {
+                const jr = await apiFetch(`${API_URL}/jobs/${jobId}`);
+                if (!jr.ok) throw new Error('Could not load job');
+                const job = await jr.json();
+                const tasks = [];
+                if (artifactType === 'resume' && job.generated_resume && job.resume_id) {
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-ats`, { method: 'POST' }));
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-industry-panel`, { method: 'POST' }));
+                } else if (artifactType === 'cover_letter' && job.has_cover_letter && job.cover_letter_id) {
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats`, { method: 'POST' }));
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel`, { method: 'POST' }));
+                }
+                await Promise.all(tasks.map(p => p.catch(() => null)));
+                content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
+            } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
         // Make functions available to inline onclick handlers
         window.reviseResume = reviseResume;
         window.generateCoverLetter = generateCoverLetter;
@@ -4747,6 +4811,8 @@ The AI will automatically extract:
         window.deleteCoverLetter = deleteCoverLetter;
         window.loadScores = loadScores;
         window.scoreAll = scoreAll;
+        window.loadScoresForEditor = loadScoresForEditor;
+        window.scoreAllForEditor = scoreAllForEditor;
         window.deleteExampleCoverLetter = deleteExampleCoverLetter;
         window.escapeHtml = escapeHtml;
 
