@@ -1668,7 +1668,20 @@ The AI will automatically extract:
         }
 
         // API Base URL
-        const isProduction = window.location.hostname === 'joblign.ronning.systems' || window.location.hostname.endsWith('.ts.net');
+        //
+        // Deployed envs (prod on joblign.ronning.systems, Tailscale fallback,
+        // and the TEST env on joblign.test.ronning.systems:9444) all serve
+        // the SPA from the API container itself, so the API is same-origin
+        // at ${origin}/api. The localhost:8765 branch is only for genuine
+        // local development (running the api on :8765 and the SPA from a
+        // separate local server). Without the test-env match below, the test
+        // hostname falls through to localhost:8765, which doesn't exist on
+        // the user's machine — the browser throws TypeError: Load failed on
+        // every API call.
+        const isProduction =
+            window.location.hostname === 'joblign.ronning.systems' ||
+            window.location.hostname === 'joblign.test.ronning.systems' ||
+            window.location.hostname.endsWith('.ts.net');
         const API_URL = isProduction
             ? `${window.location.origin}/api`
             : 'http://localhost:8765/api';
