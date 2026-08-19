@@ -326,6 +326,11 @@ def get_job(job_id: int, db: Session = Depends(get_db), current_user: User = Dep
 @app.get("/api/debug/resume/{job_id}")
 def debug_resume(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Debug: Check what's actually stored in the GeneratedResume table"""
+    # Enforce ownership: only allow access to resumes for jobs owned by the current user.
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     resumes = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).all()
     return {
         "job_id": job_id,

@@ -2431,15 +2431,15 @@ The AI will automatically extract:
                 <div class="job-item ${isArchived ? 'archived' : ''}" data-id="${job.id}">
                     <div class="job-main">
                         <div>
-                            <div class="job-title">${job.position}</div>
-                            <div class="job-company">${job.company}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${publicJobId}</span>` : ''}</div>
+                            <div class="job-title">${escapeHtml(job.position)}</div>
+                            <div class="job-company">${escapeHtml(job.company)}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${escapeHtml(publicJobId)}</span>` : ''}</div>
                         </div>
-                        <span class="status-badge ${statusClass}">${statusLabels[job.stage] || job.stage}</span>
+                        <span class="status-badge ${statusClass}">${statusLabels[job.stage] || escapeHtml(job.stage)}</span>
                     </div>
                     <div class="job-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> ${job.location || 'N/A'}</span>
+                        <span><i class="fas fa-map-marker-alt"></i> ${job.location ? escapeHtml(job.location) : 'N/A'}</span>
                         <span><i class="fas fa-calendar"></i> ${formatDate(job.applied_date || job.created_at)}</span>
-                        ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${job.remote}</span>` : ''}
+                        ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${escapeHtml(job.remote)}</span>` : ''}
                     </div>
                     <div class="job-actions">
                         ${hasGeneratedResume ? `
@@ -2550,12 +2550,13 @@ The AI will automatically extract:
 
             const statusClass = statusClasses[fullJob.stage] || 'status-applied';
             const publicJobId = fullJob.public_job_id || '';
+            const safeJobUrl = fullJob.job_url && /^https?:\/\//i.test(fullJob.job_url) ? escapeHtml(fullJob.job_url) : null;
             content.innerHTML = `
                 <div class="job-detail-header">
-                    <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || fullJob.stage}</span>
-                    <h3>${fullJob.position}</h3>
-                    <div class="company">${fullJob.company}</div>
-                    ${publicJobId ? `<div style="margin-top: 8px;"><span style="display: inline-block; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 3px 8px; background: var(--gray-100); border-radius: 4px;" title="Globally unique Job ID"><i class="fas fa-fingerprint" style="margin-right: 6px;"></i>${publicJobId}</span></div>` : ''}
+                    <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || escapeHtml(fullJob.stage)}</span>
+                    <h3>${escapeHtml(fullJob.position)}</h3>
+                    <div class="company">${escapeHtml(fullJob.company)}</div>
+                    ${publicJobId ? `<div style="margin-top: 8px;"><span style="display: inline-block; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 3px 8px; background: var(--gray-100); border-radius: 4px;" title="Globally unique Job ID"><i class="fas fa-fingerprint" style="margin-right: 6px;"></i>${escapeHtml(publicJobId)}</span></div>` : ''}
                 </div>
 
                 <div class="detail-section">
@@ -2563,11 +2564,11 @@ The AI will automatically extract:
                     <div class="detail-grid">
                         <div class="detail-item">
                             <div class="label">Location</div>
-                            <div class="value">${fullJob.location || 'Not specified'}</div>
+                            <div class="value">${fullJob.location ? escapeHtml(fullJob.location) : 'Not specified'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="label">Salary</div>
-                            <div class="value">${fullJob.salary || 'Not specified'}</div>
+                            <div class="value">${fullJob.salary ? escapeHtml(fullJob.salary) : 'Not specified'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="label">Applied Date</div>
@@ -2575,7 +2576,7 @@ The AI will automatically extract:
                         </div>
                         <div class="detail-item">
                             <div class="label">Job URL</div>
-                            <div class="value">${fullJob.job_url ? `<a href="${fullJob.job_url}" target="_blank">View Posting</a>` : 'N/A'}</div>
+                            <div class="value">${safeJobUrl ? `<a href="${safeJobUrl}" target="_blank" rel="noopener noreferrer">View Posting</a>` : 'N/A'}</div>
                         </div>
                     </div>
                 </div>
@@ -2586,7 +2587,7 @@ The AI will automatically extract:
                         // Try parsed description first, fallback to raw
                         const desc = fullJob.job_description_parsed || fullJob.job_description_raw;
                         if (desc && desc.trim()) {
-                            return `<div style="color: var(--gray-600); white-space: pre-wrap; line-height: 1.6;">${desc}</div>`;
+                            return `<div style="color: var(--gray-600); white-space: pre-wrap; line-height: 1.6;">${escapeHtml(desc)}</div>`;
                         }
                         return `<div style="color: var(--gray-500); font-style: italic;">No job description available.</div>`;
                     })()}
@@ -2617,7 +2618,7 @@ The AI will automatically extract:
                             <div style="margin-bottom: 12px;">
                                 <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Must Have:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                    ${mustHave.map(r => `<li>${r}</li>`).join('')}
+                                    ${mustHave.map(r => `<li>${escapeHtml(r)}</li>`).join('')}
                                 </ul>
                             </div>
                             ` : ''}
@@ -2625,7 +2626,7 @@ The AI will automatically extract:
                             <div>
                                 <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Nice to Have:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                    ${niceToHave.map(r => `<li>${r}</li>`).join('')}
+                                    ${niceToHave.map(r => `<li>${escapeHtml(r)}</li>`).join('')}
                                 </ul>
                             </div>
                             ` : ''}
@@ -2650,7 +2651,7 @@ The AI will automatically extract:
                         }
                         return `
                             <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                ${resp.map(r => `<li style="margin-bottom: 4px;">${r}</li>`).join('')}
+                                ${resp.map(r => `<li style="margin-bottom: 4px;">${escapeHtml(r)}</li>`).join('')}
                             </ul>
                         `;
                     })()}
@@ -2673,7 +2674,7 @@ The AI will automatically extract:
                         }
                         return `
                             <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
-                                ${kw.map(k => `<span style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">${k}</span>`).join('')}
+                                ${kw.map(k => `<span style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">${escapeHtml(k)}</span>`).join('')}
                             </div>
                         `;
                     })()}
@@ -2687,9 +2688,9 @@ The AI will automatically extract:
                     <div style="display: none; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: var(--gray-700); background: white; padding: 12px; border-radius: 4px; max-height: 300px; overflow-y: auto;">
 <strong>job_description_parsed:</strong> ${fullJob.job_description_parsed ? 'present (' + fullJob.job_description_parsed.length + ' chars)' : 'MISSING'}
 <strong>job_description_raw:</strong> ${fullJob.job_description_raw ? 'present (' + fullJob.job_description_raw.length + ' chars)' : 'MISSING'}
-<strong>requirements:</strong> ${JSON.stringify(fullJob.requirements, null, 2)}
-<strong>responsibilities:</strong> ${JSON.stringify(fullJob.responsibilities, null, 2)}
-<strong>keywords:</strong> ${JSON.stringify(fullJob.keywords, null, 2)}
+<strong>requirements:</strong> ${escapeHtml(JSON.stringify(fullJob.requirements, null, 2))}
+<strong>responsibilities:</strong> ${escapeHtml(JSON.stringify(fullJob.responsibilities, null, 2))}
+<strong>keywords:</strong> ${escapeHtml(JSON.stringify(fullJob.keywords, null, 2))}
                     </div>
                 </div>
 
@@ -2708,7 +2709,7 @@ The AI will automatically extract:
                                 <i class="fas fa-wand-magic-sparkles"></i> ${fullJob.generated_resume ? 'Regenerate' : 'Generate'} Resume
                             </button>
                         </div>
-                        <div id="resume-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.generated_resume || '<em style="color:var(--gray-500)">No resume generated yet.</em>'}</div>
+                        <div id="resume-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.generated_resume ? escapeHtml(fullJob.generated_resume) : '<em style="color:var(--gray-500)">No resume generated yet.</em>'}</div>
                         <div style="margin-top:10px;">
                             <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise resume):</label>
                             <textarea id="resume-feedback-input" rows="2" placeholder="e.g. Make the lead bullet more quantified; emphasize the AWS migration." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
@@ -2729,7 +2730,7 @@ The AI will automatically extract:
                             </button>
                             ${fullJob.has_cover_letter ? `<button class="btn btn-danger" onclick="deleteCoverLetter(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">Delete</button>` : ''}
                         </div>
-                        <div id="cover-letter-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.cover_letter || '<em style="color:var(--gray-500)">No cover letter generated yet.</em>'}</div>
+                        <div id="cover-letter-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.cover_letter ? escapeHtml(fullJob.cover_letter) : '<em style="color:var(--gray-500)">No cover letter generated yet.</em>'}</div>
                         <div style="margin-top:10px;">
                             <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise cover letter):</label>
                             <textarea id="cover-letter-feedback-input" rows="2" placeholder="e.g. Open with the specific company problem; cut the second paragraph." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
@@ -2758,7 +2759,7 @@ The AI will automatically extract:
 
                 <div class="detail-section">
                     <h4>Notes</h4>
-                    <div class="notes-box">${fullJob.notes || 'No notes added.'}</div>
+                    <div class="notes-box">${fullJob.notes ? escapeHtml(fullJob.notes) : 'No notes added.'}</div>
                 </div>
 
                 <div class="detail-section">
@@ -2769,7 +2770,7 @@ The AI will automatically extract:
                                 <div class="timeline-dot"></div>
                                 <div class="timeline-content">
                                     <div class="timeline-date">${formatDate(h.date)}</div>
-                                    <div class="timeline-text">${h.notes || h.text}</div>
+                                    <div class="timeline-text">${escapeHtml(h.notes || h.text)}</div>
                                 </div>
                             </div>
                         `).join('') || '<p style="color: var(--gray-500);">No history yet.</p>'}
