@@ -174,10 +174,11 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   fetcher sidecar (Playwright+chromium) for blocked boards (LinkedIn,
   Indeed).
 - **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
-  headless-browser sidecar. The sidecar itself lives in this repo
-  (`sidecars/fetcher/`); the my-stack deploy script builds and brings
-  it up but doesn't define its behavior. Internal-only; not exposed
-  by Traefik.
+  headless-browser sidecar. The sidecar source lives in
+  `my-stack/portainer/fetcher.{py,Dockerfile}` (the single source of
+  truth — the my-stack deploy script's step 6 enforces this with a
+  drift check that fails the build if `sidecars/fetcher/` re-appears
+  in this repo). Internal-only; not exposed by Traefik.
 - **Parser extensions** in `backend/job_parser.py`:
   `_extract_pay_range`, `_extract_application_deadline`, improved
   `_extract_credentials`. Structured pay range (`pay_range_min/max`,
@@ -188,13 +189,20 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
 
 ## Sidecars (added 2026-07-28)
 
-- **Layout:** `sidecars/{fetcher,autoapply}/` — each is a
-  self-contained subproject with Dockerfile, source, and (where
-  applicable) tests. See `sidecars/README.md` for the build
-  contract.
-- **Build:** the my-stack deploy script rsyncs each subdir to
-  patrick-mini and runs `docker buildx build` in it. Image names
-  are `jobapp-<name>:${IMAGE_TAG}`.
+- **Source location:** sidecar source (Dockerfile + .py) lives in
+  `my-stack/portainer/`, NOT in this repo. As of 2026-08-22, the
+  single source of truth is `my-stack/portainer/<name>.{py,Dockerfile}`.
+  The my-stack deploy script (`deploy-patrick-mini.sh` step 6) enforces
+  this with a drift check that fails the build if a `sidecars/<name>/`
+  subtree re-appears in either repo.
+- **Layout:** `my-stack/portainer/{fetcher,autoapply}.{py,Dockerfile}`
+  — flat-file layout (Dockerfile + source side-by-side, not nested in a
+  `<name>/` subdir). The Dockerfile is named `<name>.Dockerfile` in
+  the repo so it can be built by name; the deploy script renames it to
+  plain `Dockerfile` in the per-sidecar build context on the host.
+- **Build:** the my-stack deploy script rsyncs each sidecar's
+  Dockerfile + source to patrick-mini and runs `docker buildx build`.
+  Image names are `jobapp-<name>:${IMAGE_TAG}`.
 - **Runtime:** declared in this repo's `docker-compose.yml`
   (prod) and `docker-compose.test.yml` (test) as services on
   the external `proxy` network. The my-stack deploy script

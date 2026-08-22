@@ -25,15 +25,19 @@
 # here — Docker Desktop on WSL2 doesn't reliably expose the
 # Docker socket to Traefik's Docker provider).
 #
-# Image names: every service in this compose is built from a
-# build context owned by the job-app repo. The my-stack deploy
-# script rsyncs each build context to /srv/jobapp/<ctx>-img/ on
-# patrick-mini before building. The context mapping is:
+# Image names: every service in this compose references an image
+# that the my-stack deploy script builds and tags. The api image
+# is built from this repo's Dockerfile. The sidecar images
+# (fetcher, auto-apply) are built from my-stack/portainer/ — the
+# single source of truth for sidecar source. (The my-stack
+# deploy script's step 6 enforces this with a drift check that
+# fails the build if job-app/sidecars/ re-appears in either
+# repo.) The context mapping is:
 #   api:             Dockerfile at job-app repo root
-#   secrets-fetcher: portainer/secrets/ (stays in my-stack —
+#   secrets-fetcher: my-stack/portainer/secrets/ (stays in my-stack —
 #                    Vault bootstrap, not a job-app sidecar)
-#   fetcher:         sidecars/fetcher/ in this repo
-#   auto-apply:      sidecars/autoapply/ in this repo
+#   fetcher:         my-stack/portainer/fetcher.{Dockerfile,py}
+#   auto-apply:      my-stack/portainer/autoapply.{Dockerfile,py}
 
 x-api-image: &api-image job-app:${IMAGE_TAG:-local}
 x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
@@ -92,7 +96,7 @@ services:
     # Same posture as the original my-stack fetcher.yml: read-only
     # root fs, tmpfs /tmp for chromium scratch, no-new-privileges,
     # all caps dropped. Chromium is launched with
-    # --disable-dev-shm-usage (see sidecars/fetcher/fetcher.py) so
+    # --disable-dev-shm-usage (see my-stack/portainer/fetcher.py) so
     # the 64MB default /dev/shm doesn't OOM on large pages.
     read_only: true
     security_opt:
