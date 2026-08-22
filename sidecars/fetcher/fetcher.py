@@ -45,6 +45,14 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 NAV_TIMEOUT_MS = 30_000
+# After the `load` event fires, give JS-driven pages a bounded window to
+# hydrate and render their job content. We only sleep if the body is still
+# too short, so static pages don't pay the cost. Many job boards (Nuxt,
+# Next, etc.) keep the network busy with analytics/Tag Manager beacons,
+# so waiting for `networkidle` is unreliable — `load` plus this grace
+# period is both faster and more robust.
+HYDRATION_GRACE_MS = 4_000
+HYDRATION_TEXT_THRESHOLD = 250
 
 # Shared browser instance, populated by the lifespan startup hook and
 # torn down on shutdown. Stays None if startup failed (in which case
@@ -143,11 +151,25 @@ async def fetch(req: FetchRequest) -> dict:
     context = await _browser.new_context(user_agent=USER_AGENT)
     page = await context.new_page()
     try:
-        resp = await page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT_MS)
+        # `load` (not `networkidle`) — many modern job boards keep the
+        # network busy with analytics/Tag Manager beacons, so networkidle
+        # never fires and we time out without rendering the job content.
+        resp = await page.goto(url, wait_until="load", timeout=NAV_TIMEOUT_MS)
         # page.goto returns None if navigation was cancelled before any
         # response arrived — surface as a 502 rather than a 200 with null.
         if resp is None:
             raise HTTPException(status_code=502, detail="navigation returned no response")
+        # JS-driven pages (Nuxt, Next, React) may have shipped an empty
+        # shell by the `load` event and only rendered content moments
+        # later. Give them a bounded window to hydrate, but only sleep
+        # if the body still looks empty so we don't slow down static
+        # pages.
+        try:
+            body_text = await page.inner_text("body")
+        except PlaywrightError:
+            body_text = ""
+        if len(body_text.strip()) < HYDRATION_TEXT_THRESHOLD:
+            await page.wait_for_timeout(HYDRATION_GRACE_MS)
         html = await page.content()
         return {
             "html": html,
