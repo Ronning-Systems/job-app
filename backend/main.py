@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import logging
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from datetime import datetime
 import httpx
 import asyncio
 import json as _json
+from bs4 import BeautifulSoup
 
 from models import (
     init_db,
@@ -1789,6 +1791,39 @@ def get_job_scores(job_id: int, artifact_type: Optional[str] = None, db: Session
 
 # ---- URL-only job creation (httpx first, fetcher sidecar fallback) ----
 
+# If a direct httpx fetch comes back with a body that is just a JS-SPA shell
+# (Nuxt/Next/React/Vue roots present but no rendered content) the parser will
+# produce an empty/unknown result. The fetcher sidecar renders the page with
+# a headless browser, so route those cases through it as well.
+# A page is considered a "shell" if, after stripping <script>/<style>, the
+# visible text is very short AND a known SPA root marker is present. This
+# avoids false positives on legitimately text-light job posts.
+_SHELL_TEXT_THRESHOLD = 250
+_SPA_ROOT_RE = re.compile(
+    r'<div\s+id="(?:__nuxt|__next|root|app|app-root)"\s*></div>',
+    re.IGNORECASE,
+)
+
+
+def _looks_like_spa_shell(html_content: str) -> bool:
+    """Return True if the HTML is a JS-SPA shell with no rendered content.
+
+    Mirrors the kind of body served by Nuxt SSR with data-ssr="false" (e.g.
+    providence.jobs), where httpx sees a 200 with a near-empty body and
+    Playwright is required to actually render the page.
+    """
+    if not html_content:
+        return True
+    soup = BeautifulSoup(html_content, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    text = soup.get_text(separator=" ", strip=True)
+    if len(text) >= _SHELL_TEXT_THRESHOLD:
+        return False
+    # Short text + a known SPA root marker in the original HTML -> shell.
+    return bool(_SPA_ROOT_RE.search(html_content))
+
+
 @app.post("/api/jobs/from-url")
 async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Fetch a job posting from a URL, parse it, and create the job in one call.
@@ -1826,9 +1861,11 @@ async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, 
     except Exception as e:
         fetch_error = str(e)
 
-    # Attempt 2: fetcher sidecar fallback (Playwright) on 403/blocked/empty
+    # Attempt 2: fetcher sidecar fallback (Playwright) on 403/blocked/empty,
+    # or when the direct fetch came back as a JS-SPA shell that the parser
+    # can't extract any text from (e.g. Nuxt SSR with data-ssr="false").
     fetcher_url = os.getenv("FETCHER_URL", "http://fetcher:8080")
-    if (not html_content or fetch_error) and fetcher_url:
+    if fetcher_url and ((not html_content or fetch_error) or _looks_like_spa_shell(html_content or "")):
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 r = await client.post(f"{fetcher_url}/fetch", json={"url": url}, headers={"Content-Type": "application/json"})
