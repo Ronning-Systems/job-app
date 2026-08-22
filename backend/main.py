@@ -1874,7 +1874,15 @@ async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, 
                 html_content = data.get("html")
                 fetch_error = None
         except Exception as e:
-            # If the sidecar isn't reachable, keep the original error
+            # Sidecar failed (unreachable, 5xx, bad response, etc.). If the
+            # original httpx fetch was itself a JS-SPA shell, falling back
+            # to that shell would just have the parser "succeed" on the
+            # page title and fabricate a bogus job — so drop the shell
+            # and surface a 502 instead. Keep the original error message
+            # if we had one (so the user sees the sidecar failure
+            # explicitly when the direct fetch was also empty/blocked).
+            if not html_content or _looks_like_spa_shell(html_content or ""):
+                html_content = None
             if not fetch_error:
                 fetch_error = f"fetcher sidecar: {str(e)}"
 
