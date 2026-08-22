@@ -1549,8 +1549,16 @@ The AI will automatically extract:
         let pendingTemplate = null;
 
         // ---------- Generation progress + notifications ---------------------
-        // Active generations keyed by jobId. Each entry: {jobId, company, position, step, percent, status}.
+        // Active generations keyed by `${jobId}:${kind}` (kind is 'resume' or
+        // 'cover-letter') so a resume generation does NOT block a cover-letter
+        // click on the same job, and vice versa. Each entry: {jobId, kind,
+        // company, position, step, percent, status}. The previous single-key
+        // design caused the cover-letter handler to short-circuit whenever a
+        // resume was already queued for the same jobId (the guard checked
+        // `activeGenerations.has(jobId)` and bailed without ever hitting the
+        // API).
         let activeGenerations = new Map();
+        const _genKey = (jobId, kind) => `${jobId}:${kind}`;
         // Notifications for completed generations not yet viewed. Each entry:
         // {id, jobId, company, position, version, model, timestamp, viewed}.
         let notifications = JSON.parse(localStorage.getItem('joblignNotifications')) || [];
@@ -1677,8 +1685,8 @@ The AI will automatically extract:
             }).join('');
         }
 
-        function setGenerationStatus(jobId, status, step, percent) {
-            const g = activeGenerations.get(jobId);
+        function setGenerationStatus(jobId, kind, status, step, percent) {
+            const g = activeGenerations.get(_genKey(jobId, kind));
             if (!g) return;
             g.status = status;
             g.step = step;
@@ -1686,8 +1694,8 @@ The AI will automatically extract:
             renderGenerationProgress();
         }
 
-        function removeActiveGeneration(jobId) {
-            activeGenerations.delete(jobId);
+        function removeActiveGeneration(jobId, kind) {
+            activeGenerations.delete(_genKey(jobId, kind));
             renderGenerationProgress();
         }
 
@@ -3705,8 +3713,10 @@ The AI will automatically extract:
                 return;
             }
 
-            // Avoid double-kicking the same job while one is already running.
-            if (activeGenerations.has(jobId)) {
+            // Avoid double-kicking the same jobId + kind while one is already running.
+            // Key is (jobId, kind) so a cover-letter generation does NOT block a
+            // resume click on the same job (and vice versa).
+            if (activeGenerations.has(_genKey(jobId, 'resume'))) {
                 console.log('[generateResume] Generation already in progress for job', jobId);
                 return;
             }
@@ -3752,7 +3762,7 @@ The AI will automatically extract:
                 }
 
                 // Register this generation for non-blocking tracking.
-                activeGenerations.set(jobId, {
+                activeGenerations.set(_genKey(jobId, 'resume'), {
                     jobId,
                     kind: 'resume',
                     company: job.company,
@@ -3790,11 +3800,12 @@ The AI will automatically extract:
                     return;
                 }
 
-                const checks = Array.from(activeGenerations.entries()).map(async ([jobId, gen]) => {
+                const checks = Array.from(activeGenerations.entries()).map(async ([_key, gen]) => {
+                    const jobId = gen.jobId;
                     try {
                         const r = await apiFetch(statusEndpoint(gen.kind, jobId));
                         if (!r.ok) {
-                            setGenerationStatus(jobId, 'error', 'Failed to check status', 0);
+                            setGenerationStatus(jobId, gen.kind, 'error', 'Failed to check status', 0);
                             return { jobId, error: 'status check failed' };
                         }
                         const result = await r.json();
@@ -3882,7 +3893,7 @@ The AI will automatically extract:
                                 } catch (err) { console.error(err); }
                             }
 
-                            removeActiveGeneration(jobId);
+                            removeActiveGeneration(jobId, gen.kind);
 
                             if (gen.kind === 'resume' && result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
                                 setTimeout(() => {
@@ -3893,12 +3904,12 @@ The AI will automatically extract:
                         } else if (result.status === 'error') {
                             const genJob = jobs.find(j => j.id === jobId);
                             const kindLabel = gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
-                            setGenerationStatus(jobId, 'error', result.error || 'Generation failed', 0);
-                            removeActiveGeneration(jobId);
+                            setGenerationStatus(jobId, gen.kind, 'error', result.error || 'Generation failed', 0);
+                            removeActiveGeneration(jobId, gen.kind);
                             alert(`${kindLabel} generation failed for ${genJob?.position || gen.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
                             return { jobId, error: result.error };
                         } else {
-                            setGenerationStatus(jobId, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(jobId)?.percent) || 0);
+                            setGenerationStatus(jobId, gen.kind, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(_genKey(jobId, gen.kind))?.percent) || 0);
                             return { jobId, processing: true };
                         }
                     } catch (e) {
@@ -4688,8 +4699,10 @@ The AI will automatically extract:
             const job = jobs.find(j => j.id === jobId);
             if (!job) return;
 
-            // Avoid double-kicking the same job while one is already running.
-            if (activeGenerations.has(jobId)) {
+            // Avoid double-kicking the same jobId + kind while one is already running.
+            // Key is (jobId, kind) so a resume generation does NOT block a
+            // cover-letter click on the same job (and vice versa).
+            if (activeGenerations.has(_genKey(jobId, 'cover-letter'))) {
                 console.log('[generateCoverLetter] Generation already in progress for job', jobId);
                 return;
             }
@@ -4729,7 +4742,7 @@ The AI will automatically extract:
                 }
 
                 // Register this generation for non-blocking tracking.
-                activeGenerations.set(jobId, {
+                activeGenerations.set(_genKey(jobId, 'cover-letter'), {
                     jobId,
                     kind: 'cover-letter',
                     company: job.company,
