@@ -6,11 +6,10 @@
 # service names. To avoid the collision:
 #   - every service has `-test` appended to its service name
 #   - every container has `-test` appended to its container_name
-#   - the api's FETCHER_URL / AUTOAPPLY_URL reference the
-#     -test service names (http://fetcher-test:8080, etc.)
+#   - the api's FETCHER_URL references the -test service name
+#     (http://fetcher-test:8080)
 #   - host volume paths live under /srv/jobapp-test/...
 #   - the Docker volume name is jobapp-test-secrets
-#   - the HMAC secret file is /srv/jobapp-test/secrets/autoapply_hmac_secret
 #
 # Same as prod:
 #   - the `proxy` Docker network (one network for all envs)
@@ -24,14 +23,14 @@
 # The my-stack deploy script (deploy-patrick-mini.sh) renders this
 # file when DEPLOY_ENV=test, and renders docker-compose.yml when
 # DEPLOY_ENV is unset or DEPLOY_ENV=prod. Both files declare the
-# same five services; the only differences are names + paths.
+# same four services (postgres, secrets-fetcher, fetcher, api);
+# the only differences are names + paths.
 #
 # Traefik routes joblign.test.ronning.systems to http://jobapp-test:8080
 # via the jobapp-test router in portainer/traefik.dynamic.yml.
 
 x-api-image: &api-image job-app:${IMAGE_TAG:-local}
 x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
-x-autoapply-image: &autoapply-image jobapp-auto-apply:${IMAGE_TAG:-local}
 x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
 
 services:
@@ -126,48 +125,15 @@ services:
       retries: 5
       start_period: 30s
 
-  auto-apply-test:
-    image: *autoapply-image
-    container_name: jobapp-test-auto-apply
-    restart: unless-stopped
-    mem_limit: 1g
-    cpus: 1
-    environment:
-      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
-    secrets:
-      - autoapply_hmac_secret
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp
-    networks:
-      - proxy-test
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz').read()"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   api-test:
     image: *api-image
     container_name: jobapp-test
     restart: unless-stopped
     mem_limit: 1g
     environment:
-      # Same HMAC secret file as the auto-apply sidecar; both
-      # containers read the same shared secret (materialized by
-      # the deploy script at /srv/jobapp-test/secrets/autoapply_hmac_secret
-      # for the test env). The api uses it to sign outbound
-      # requests; the sidecar uses it to verify them.
-      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
       # Sidecar URLs use the -test service names (per the proxy
       # network's service DNS). The api container's /api/health/system
       # rollup endpoint probes these same URLs.
-      AUTOAPPLY_URL: "http://auto-apply-test:8081"
       FETCHER_URL: "http://fetcher-test:8080"
       # Disable Auth0 on test so the SPA skips login entirely and
       # uses a local-dev user.  The frontend also supports an
@@ -187,8 +153,6 @@ services:
       # below sources them automatically — we just need to make
       # sure the test Vault path has the Test Application's
       # AUTH0_DOMAIN, AUTH0_AUDIENCE, AUTH0_ISSUERS, etc.
-    secrets:
-      - autoapply_hmac_secret
     entrypoint:
       - sh
       - -c
@@ -203,8 +167,6 @@ services:
       secrets-fetcher-test:
         condition: service_completed_successfully
       fetcher-test:
-        condition: service_healthy
-      auto-apply-test:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health').read()"]
@@ -250,7 +212,3 @@ secrets:
     # /srv/jobapp-test/secrets/pg_password on every test
     # deploy.
     file: /srv/jobapp-test/secrets/pg_password
-  autoapply_hmac_secret:
-    # Separate HMAC secret per env so prod + test sidecars
-    # don't share auth.
-    file: /srv/jobapp-test/secrets/autoapply_hmac_secret

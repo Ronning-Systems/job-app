@@ -1,7 +1,7 @@
 """Tests for the /api/health/system rollup endpoint.
 
-The rollup probes every job-app-owned dependency (fetcher, auto-apply,
-postgres, ollama) and returns one 200/503 the deploy script can poll.
+The rollup probes every job-app-owned dependency (fetcher, postgres,
+ollama) and returns one 200/503 the deploy script can poll.
 The shallow /api/health endpoint stays unchanged for backward compat
 with the Traefik healthcheck and the existing my-stack deploy
 script's per-container healthcheck loop.
@@ -50,7 +50,6 @@ def _patch_probes(**probe_returns):
     default to ("ok", None)."""
     defaults = {
         "fetcher": ("ok", None),
-        "autoapply": ("ok", None),
         "postgres": ("ok", None),
         "ollama": ("ok", None),
     }
@@ -74,14 +73,14 @@ def test_health_system_reports_overall_ok_when_all_components_ok(client):
     assert r.status_code == 200
     body = r.json()
     assert body["overall"] == "ok"
-    assert set(body["components"].keys()) == {"fetcher", "autoapply", "postgres", "ollama"}
+    assert set(body["components"].keys()) == {"fetcher", "postgres", "ollama"}
     for name, comp in body["components"].items():
         assert comp["status"] == "ok", f"{name} should be ok: {comp}"
         assert comp["detail"] is None
 
 
 def test_health_system_reports_degraded_when_one_component_down(client):
-    patches = _patch_probes(autoapply=("down", "browser not ready"))
+    patches = _patch_probes(fetcher=("down", "connection refused"))
     for p in patches:
         p.start()
     try:
@@ -93,17 +92,16 @@ def test_health_system_reports_degraded_when_one_component_down(client):
     assert r.status_code == 503
     body = r.json()
     assert body["overall"] == "degraded"
-    assert body["components"]["autoapply"]["status"] == "down"
-    assert body["components"]["autoapply"]["detail"] == "browser not ready"
-    # The other three should still report ok
-    for name in ("fetcher", "postgres", "ollama"):
+    assert body["components"]["fetcher"]["status"] == "down"
+    assert body["components"]["fetcher"]["detail"] == "connection refused"
+    # The other two should still report ok
+    for name in ("postgres", "ollama"):
         assert body["components"][name]["status"] == "ok"
 
 
 def test_health_system_returns_503_when_all_components_down(client):
     patches = _patch_probes(
         fetcher=("down", "connection refused"),
-        autoapply=("down", "browser not ready"),
         postgres=("down", "OperationalError"),
         ollama=("down", "timeout"),
     )
@@ -118,7 +116,7 @@ def test_health_system_returns_503_when_all_components_down(client):
     assert r.status_code == 503
     body = r.json()
     assert body["overall"] == "degraded"
-    for name in ("fetcher", "autoapply", "postgres", "ollama"):
+    for name in ("fetcher", "postgres", "ollama"):
         assert body["components"][name]["status"] == "down"
 
 
@@ -127,7 +125,6 @@ def test_health_system_handles_probe_exception_as_down(client):
     the rollup should treat it as 'down' and report the error type
     + message as detail, not crash the endpoint."""
     with patch("health._probe_fetcher", AsyncMock(side_effect=ConnectionError("simulated"))), \
-         patch("health._probe_autoapply", AsyncMock(return_value=("ok", None))), \
          patch("health._probe_postgres", AsyncMock(return_value=("ok", None))), \
          patch("health._probe_ollama", AsyncMock(return_value=("ok", None))):
         r = client.get("/api/health/system")
@@ -152,4 +149,4 @@ def test_health_system_component_set_is_stable(client):
         for p in patches:
             p.stop()
     assert keys_1 == keys_2
-    assert keys_1 == {"fetcher", "autoapply", "postgres", "ollama"}
+    assert keys_1 == {"fetcher", "postgres", "ollama"}

@@ -195,7 +195,7 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   The my-stack deploy script (`deploy-patrick-mini.sh` step 6) enforces
   this with a drift check that fails the build if a `sidecars/<name>/`
   subtree re-appears in either repo.
-- **Layout:** `my-stack/portainer/{fetcher,autoapply}.{py,Dockerfile}`
+- **Layout:** `my-stack/portainer/fetcher.{py,Dockerfile}`
   — flat-file layout (Dockerfile + source side-by-side, not nested in a
   `<name>/` subdir). The Dockerfile is named `<name>.Dockerfile` in
   the repo so it can be built by name; the deploy script renames it to
@@ -211,10 +211,8 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   suffixes on every service + container_name so prod and test
   can run in parallel on the same `proxy` network without DNS
   collisions.
-- **Auth:** fetcher has no auth (callable only from the internal
-  proxy network). Auto-apply uses HMAC-SHA256; the secret is
-  materialized by the my-stack deploy script and mounted as a
-  Docker secret into both the sidecar and the api container.
+- **Auth:** the fetcher has no auth (callable only from the internal
+  proxy network).
 - **Health:** every sidecar exposes `GET /healthz` (unauth).
   `GET /api/health/system` on the api service probes every
   sidecar + postgres + ollama and returns one 200/503 the

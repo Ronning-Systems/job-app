@@ -7,16 +7,16 @@ dependency chain. If they stop parsing, the next deploy breaks.
 If the service set changes accidentally, the deploy script's
 image build loop won't match. These tests are cheap insurance.
 
-The prod and test composes are structurally identical: same five
-services, same security posture, same healthchecks, same
-dependency chain. The differences are the names + paths (test
-uses -test suffixes on every service and container_name so prod
-and test can run in parallel on the same `proxy` Docker network
-without DNS collisions).
+The prod and test composes are structurally identical: same four
+services (postgres, secrets-fetcher, fetcher, api), same security
+posture, same healthchecks, same dependency chain. The differences
+are the names + paths (test uses -test suffixes on every service
+and container_name so prod and test can run in parallel on the
+same `proxy` Docker network without DNS collisions).
 
 Run from the job-app repo root:
 
-    /opt/data/.venv-autoapply/bin/pytest backend/tests/test_compose.py -v
+    /opt/data/.venv-app/bin/pytest backend/tests/test_compose.py -v
 """
 from __future__ import annotations
 
@@ -47,14 +47,12 @@ SERVICE_NAMES = {
         "postgres": "postgres",
         "secrets-fetcher": "secrets-fetcher",
         "fetcher": "fetcher",
-        "auto-apply": "auto-apply",
         "api": "api",
     },
     "docker-compose.test.yml": {
         "postgres": "postgres-test",
         "secrets-fetcher": "secrets-fetcher-test",
         "fetcher": "fetcher-test",
-        "auto-apply": "auto-apply-test",
         "api": "api-test",
     },
 }
@@ -78,10 +76,10 @@ def compose_pair(request):
 # ---------------------------------------------------------------------------
 
 
-def test_declares_all_five_services(compose_pair):
-    """The runtime contract: postgres, secrets-fetcher, fetcher,
-    auto-apply, and api. Adding a new service should be a conscious
-    change; this test fails if anyone accidentally drops one."""
+def test_declares_all_four_services(compose_pair):
+    """The runtime contract: postgres, secrets-fetcher, fetcher, and
+    api. Adding a new service should be a conscious change; this test
+    fails if anyone accidentally drops one."""
     filename, compose, names = compose_pair
     expected = set(names.values())
     assert set(compose["services"].keys()) == expected, \
@@ -90,7 +88,7 @@ def test_declares_all_five_services(compose_pair):
 
 def test_declares_required_secrets(compose_pair):
     filename, compose, _ = compose_pair
-    expected = {"vault_token", "pg_password", "autoapply_hmac_secret"}
+    expected = {"vault_token", "pg_password"}
     assert set(compose["secrets"].keys()) == expected, \
         f"{filename} is missing or has extra secrets"
 
@@ -145,8 +143,8 @@ def test_uses_external_proxy_network(compose_pair):
 
 def test_api_depends_on_all_components(compose_pair):
     """The api service must wait for postgres to be healthy,
-    secrets-fetcher to complete (it runs once), and the two
-    sidecars to be healthy."""
+    secrets-fetcher to complete (it runs once), and the fetcher
+    sidecar to be healthy."""
     filename, compose, names = compose_pair
     deps = compose["services"][names["api"]]["depends_on"]
     assert deps[names["postgres"]]["condition"] == "service_healthy", \
@@ -155,22 +153,20 @@ def test_api_depends_on_all_components(compose_pair):
         f"{filename} api must depend on secrets-fetcher completed"
     assert deps[names["fetcher"]]["condition"] == "service_healthy", \
         f"{filename} api must depend on fetcher healthy"
-    assert deps[names["auto-apply"]]["condition"] == "service_healthy", \
-        f"{filename} api must depend on auto-apply healthy"
 
 
 def test_sidecars_have_healthchecks(compose_pair):
     filename, compose, names = compose_pair
-    for sidecar in (names["fetcher"], names["auto-apply"]):
+    for sidecar in (names["fetcher"],):
         assert "healthcheck" in compose["services"][sidecar], \
             f"{filename} {sidecar} is missing a healthcheck"
 
 
 def test_sidecars_have_security_posture(compose_pair):
-    """Both sidecars must run with read-only rootfs + cap_drop ALL
-    + no-new-privileges."""
+    """The fetcher sidecar must run with read-only rootfs + cap_drop
+    ALL + no-new-privileges."""
     filename, compose, names = compose_pair
-    for sidecar in (names["fetcher"], names["auto-apply"]):
+    for sidecar in (names["fetcher"],):
         svc = compose["services"][sidecar]
         assert svc.get("read_only") is True, f"{filename} {sidecar} must be read_only"
         assert svc.get("security_opt") == ["no-new-privileges:true"], \
@@ -179,18 +175,6 @@ def test_sidecars_have_security_posture(compose_pair):
             f"{filename} {sidecar} must drop all caps"
         assert "/tmp" in svc.get("tmpfs", []), \
             f"{filename} {sidecar} must have tmpfs /tmp for chromium scratch"
-
-
-def test_api_uses_secret_file_for_hmac(compose_pair):
-    filename, compose, names = compose_pair
-    api = compose["services"][names["api"]]
-    assert api["environment"]["AUTOAPPLY_HMAC_SECRET_FILE"] == "/run/secrets/autoapply_hmac_secret", \
-        f"{filename} api must reference /run/secrets/autoapply_hmac_secret"
-    assert "autoapply_hmac_secret" in api["secrets"], \
-        f"{filename} api must mount autoapply_hmac_secret"
-    autoapply = compose["services"][names["auto-apply"]]
-    assert autoapply["environment"]["AUTOAPPLY_HMAC_SECRET_FILE"] == "/run/secrets/autoapply_hmac_secret", \
-        f"{filename} auto-apply must reference /run/secrets/autoapply_hmac_secret"
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +218,9 @@ def test_api_uses_service_names_for_sidecar_urls():
 
     assert prod["services"]["api"]["environment"]["FETCHER_URL"] == "http://fetcher:8080", \
         "prod api must use http://fetcher:8080"
-    assert prod["services"]["api"]["environment"]["AUTOAPPLY_URL"] == "http://auto-apply:8081", \
-        "prod api must use http://auto-apply:8081"
 
     assert test["services"]["api-test"]["environment"]["FETCHER_URL"] == "http://fetcher-test:8080", \
         "test api must use http://fetcher-test:8080"
-    assert test["services"]["api-test"]["environment"]["AUTOAPPLY_URL"] == "http://auto-apply-test:8081", \
-        "test api must use http://auto-apply-test:8081"
 
 
 def test_test_compose_uses_separate_vault_path():
@@ -265,10 +245,6 @@ def test_test_compose_uses_separate_host_paths():
     pg_pw = test["secrets"]["pg_password"]["file"]
     assert pg_pw.startswith("/srv/jobapp-test/"), \
         f"test pg_password must be under /srv/jobapp-test/, got {pg_pw}"
-    # HMAC secret file path is also under /srv/jobapp-test/
-    hmac = test["secrets"]["autoapply_hmac_secret"]["file"]
-    assert hmac.startswith("/srv/jobapp-test/"), \
-        f"test HMAC secret must be under /srv/jobapp-test/, got {hmac}"
 
 
 def test_test_compose_uses_separate_postgres_db():

@@ -1,17 +1,16 @@
 # Joblign + sidecars compose.
 #
 # Single compose project for the joblign stack: postgres,
-# secrets-fetcher, fetcher (URL rendering), auto-apply, and the
-# api service. Brings everything up as one unit instead of three
-# my-stack projects.
+# secrets-fetcher, fetcher (URL rendering), and the api service.
+# Brings everything up as one unit instead of three my-stack
+# projects.
 #
 # The my-stack deploy script (deploy-patrick-mini.sh) is
 # responsible for:
-#   - building the job-app, jobapp-fetcher, jobapp-auto-apply, and
+#   - building the job-app, jobapp-fetcher, and
 #     jobapp-secrets-fetcher images on patrick-mini (via
 #     `docker buildx build` in each build context)
 #   - creating the external `proxy` Docker network (one-time setup)
-#   - materializing the autoapply_hmac_secret file on the host
 #   - substituting ${IMAGE_TAG} below (envsubst whitelist in
 #     deploy-patrick-mini.sh's render_compose)
 #   - bringing the whole stack up with
@@ -27,21 +26,18 @@
 #
 # Image names: every service in this compose references an image
 # that the my-stack deploy script builds and tags. The api image
-# is built from this repo's Dockerfile. The sidecar images
-# (fetcher, auto-apply) are built from my-stack/portainer/ — the
-# single source of truth for sidecar source. (The my-stack
-# deploy script's step 6 enforces this with a drift check that
-# fails the build if job-app/sidecars/ re-appears in either
-# repo.) The context mapping is:
+# is built from this repo's Dockerfile. The fetcher sidecar is
+# built from my-stack/portainer/ — the single source of truth for
+# sidecar source. (The my-stack deploy script's step 6 enforces
+# this with a drift check that fails the build if a sidecar
+# subtree re-appears in either repo.) The context mapping is:
 #   api:             Dockerfile at job-app repo root
 #   secrets-fetcher: my-stack/portainer/secrets/ (stays in my-stack —
 #                    Vault bootstrap, not a job-app sidecar)
 #   fetcher:         my-stack/portainer/fetcher.{Dockerfile,py}
-#   auto-apply:      my-stack/portainer/autoapply.{Dockerfile,py}
 
 x-api-image: &api-image job-app:${IMAGE_TAG:-local}
 x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
-x-autoapply-image: &autoapply-image jobapp-auto-apply:${IMAGE_TAG:-local}
 x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
 
 services:
@@ -114,52 +110,13 @@ services:
       retries: 5
       start_period: 30s
 
-  auto-apply:
-    image: *autoapply-image
-    container_name: jobapp-auto-apply
-    restart: unless-stopped
-    mem_limit: 1g
-    cpus: 1
-    environment:
-      # HMAC secret is mounted as a file (not a raw env var) so
-      # it never appears in `docker inspect` output. The my-stack
-      # deploy script materializes this file from a 48-char base64
-      # secret on first deploy and preserves it on subsequent
-      # deploys so manual rotation survives.
-      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
-    secrets:
-      - autoapply_hmac_secret
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp
-    networks:
-      - proxy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz').read()"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   api:
     image: *api-image
     container_name: jobapp
     restart: unless-stopped
     mem_limit: 1g
     environment:
-      # Same HMAC secret file as the auto-apply sidecar; both
-      # containers read the same shared secret. The api uses it
-      # to sign outbound requests to the sidecar; the sidecar
-      # uses it to verify them.
-      AUTOAPPLY_HMAC_SECRET_FILE: /run/secrets/autoapply_hmac_secret
-      AUTOAPPLY_URL: "http://auto-apply:8081"
       FETCHER_URL: "http://fetcher:8080"
-    secrets:
-      - autoapply_hmac_secret
     # Source env from materialized .env files written by secrets-fetcher.
     # Use a for-loop because '. /secrets/env/*.env' only sources the
     # first file matching the glob (the . builtin takes a single
@@ -180,8 +137,6 @@ services:
       secrets-fetcher:
         condition: service_completed_successfully
       fetcher:
-        condition: service_healthy
-      auto-apply:
         condition: service_healthy
     # Routing is defined in portainer/traefik.dynamic.yml (file
     # provider), NOT via Traefik labels — Docker Desktop on WSL2
@@ -207,5 +162,3 @@ secrets:
     file: /srv/jobapp/vault/jobapp.token
   pg_password:
     file: /srv/jobapp/secrets/pg_password
-  autoapply_hmac_secret:
-    file: /srv/jobapp/secrets/autoapply_hmac_secret
