@@ -170,6 +170,7 @@ class JobDetailResponse(JobResponse):
     history: Optional[list]
     generated_resume: Optional[str]
     cover_letter: Optional[str] = None
+    cover_letter_id: Optional[int] = None
     cover_letter_revisions: Optional[list] = []
 
 
@@ -1327,6 +1328,7 @@ def format_job_response(
         "atoms_snapshot": latest_resume.atoms_snapshot if latest_resume else None,
         "has_cover_letter": cover_letter is not None,
         "cover_letter": cover_letter,
+        "cover_letter_id": latest_cover_letter.id if latest_cover_letter else None,
         "cover_letter_revisions": cover_letter_revisions,
     }
 

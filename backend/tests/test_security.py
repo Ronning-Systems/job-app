@@ -39,7 +39,7 @@ from main import app  # noqa: E402
 import pytest
 from fastapi.testclient import TestClient
 
-from models import GeneratedResume, Job, JobApplication, SessionLocal, User  # noqa: E402
+from models import GeneratedCoverLetter, GeneratedResume, Job, JobApplication, SessionLocal, User  # noqa: E402
 
 
 def _reset_test_db():
@@ -107,6 +107,46 @@ def _make_job_with_resume(db: SessionLocal, user: User) -> tuple[Job, GeneratedR
 def _client_for(user: User) -> TestClient:
     app.dependency_overrides[get_current_user] = lambda: user
     return TestClient(app)
+
+
+class TestJobDetailCoverLetterId:
+    def test_job_detail_includes_cover_letter_id(self, db):
+        user = _make_user(db, "owner")
+        job, _ = _make_job_with_resume(db, user)
+        cl = GeneratedCoverLetter(
+            job_id=job.id,
+            user_id=user.id,
+            current_content="secret cover letter content",
+            revisions=[],
+        )
+        db.add(cl)
+        db.commit()
+        db.refresh(cl)
+
+        client = _client_for(user)
+        try:
+            response = client.get(f"/api/jobs/{job.id}")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["has_cover_letter"] is True
+            assert data["cover_letter_id"] == cl.id
+            assert data["cover_letter"] == cl.current_content
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_job_detail_cover_letter_id_null_when_no_cover_letter(self, db):
+        user = _make_user(db, "owner")
+        job, _ = _make_job_with_resume(db, user)
+
+        client = _client_for(user)
+        try:
+            response = client.get(f"/api/jobs/{job.id}")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["has_cover_letter"] is False
+            assert data["cover_letter_id"] is None
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
 
 
 class TestDebugResumeIdor:

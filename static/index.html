@@ -5028,28 +5028,25 @@ The AI will automatically extract:
             content.innerHTML = '<em style="color:var(--gray-500)">Running ATS + industry panel on resume and cover letter... this runs in the background.</em>';
             // Kick off all four scorings (resume ats, resume panel, cover-letter ats, cover-letter panel) — fire and forget
             try {
-                // Need resume_id and cover_letter_id — fetch the job detail
                 const jr = await apiFetch(`${API_URL}/jobs/${jobId}`);
                 if (!jr.ok) throw new Error('Could not load job');
                 const job = await jr.json();
                 const tasks = [];
                 if (job.generated_resume) {
-                    // resume_id is needed; the route takes it as a path param. We don't have it on the list response,
-                    // so use the from-URL of the latest. For simplicity, call the no-id variant by fetching first.
                     const gr = await apiFetch(`${API_URL}/debug/resume/${jobId}`);
                     if (gr.ok) {
                         const dbg = await gr.json();
-                        const resumeId = dbg.id;
+                        const resumes = (dbg.resumes || []).slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+                        const resumeId = resumes[0] && resumes[0].id;
                         if (resumeId) {
                             tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats`, { method: 'POST' }));
                             tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel`, { method: 'POST' }));
                         }
                     }
                 }
-                if (job.has_cover_letter) {
-                    // cover_letter_id unknown on list response; the GET detail returns has_cover_letter but not id.
-                    // Use the scores route's own logic by attempting the latest; for now poll the scores endpoint.
-                    // Simplification: call a no-id variant. Since routes require id, fall back to scores fetch.
+                if (job.has_cover_letter && job.cover_letter_id) {
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats`, { method: 'POST' }));
+                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel`, { method: 'POST' }));
                 }
                 await Promise.all(tasks.map(p => p.catch(() => null)));
                 content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
