@@ -249,8 +249,6 @@ job-app/
 ├── agents/                    # Agent prompt definitions
 │   ├── ats-expert.md
 │   ├── resume-generator.md
-│   ├── hr-professional.md
-│   ├── tech-hiring-manager.md
 │   ├── technical-hiring-manager.md
 │   ├── cover-letter-generator.md   # Cover letter generation + revision
 │   └── industry-panel.md           # 4-persona industry panel scoring

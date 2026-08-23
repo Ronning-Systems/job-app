@@ -179,25 +179,37 @@
             background: var(--primary-dark);
         }
 
-        /* Main Grid */
+        /* Kanban Board */
         .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
+            display: flex;
+            gap: 16px;
+            align-items: stretch;
+            overflow-x: auto;
+            padding: 4px 4px 12px 4px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--gray-300) transparent;
         }
 
-        @media (max-width: 1024px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
+        .grid::-webkit-scrollbar {
+            height: 10px;
         }
 
-        /* Cards */
+        .grid::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: 6px;
+        }
+
+        /* Cards (kanban columns) */
         .card {
             background: white;
             border-radius: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             overflow: hidden;
+            flex: 0 0 320px;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 180px);
         }
 
         .card-header {
@@ -251,6 +263,9 @@
 
         .card-content {
             padding: 16px;
+            overflow-y: auto;
+            flex: 1 1 auto;
+            min-height: 0;
         }
 
         /* Job List */
@@ -884,6 +899,8 @@
                 </button>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="search-input" placeholder="Search company, position, location..."
+                    style="font-size: 0.9rem; padding: 6px 12px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); width: 240px;">
                 <label for="sort-select" style="font-size: 0.85rem; color: var(--gray-600); font-weight: 500;">Sort:</label>
                 <select id="sort-select" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
                     <option value="created">Date added</option>
@@ -1773,6 +1790,7 @@ The AI will automatically extract:
         let currentJobId = null;
         let currentSort = 'created';
         let currentOrder = 'desc';
+        let currentSearch = '';
 
         // DOM Elements
         const jobModal = document.getElementById('job-modal');
@@ -2168,6 +2186,7 @@ The AI will automatically extract:
                 const params = new URLSearchParams();
                 if (currentSort) params.set('sort', currentSort);
                 if (currentOrder) params.set('order', currentOrder);
+                if (currentSearch) params.set('search', currentSearch);
                 const qs = params.toString();
                 const response = await apiFetch(`${API_URL}/jobs${qs ? '?' + qs : ''}`);
                 if (!response.ok) throw new Error('Failed to fetch jobs');
@@ -4473,6 +4492,17 @@ The AI will automatically extract:
         });
 
         // ─── Sort dropdown ───
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            let searchTimer = null;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    currentSearch = e.target.value.trim();
+                    fetchJobs();
+                }, 300);
+            });
+        }
         document.getElementById('sort-select').addEventListener('change', async (e) => {
             currentSort = e.target.value;
             await fetchJobs();

@@ -253,8 +253,7 @@ class AgentService:
             alt_names = {
                 "ats-expert": "ats-expert",
                 "resume-generator": "resume-generator",
-                "technical-hiring-manager": "tech-hiring-manager",
-                "tech-hiring-manager": "tech-hiring-manager",
+                "technical-hiring-manager": "technical-hiring-manager",
                 "job-archiver": "job-archiver",
             }
             agent_file = self.agents_dir / f"{alt_names.get(agent_name, agent_name)}.md"
