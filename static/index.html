@@ -346,6 +346,72 @@
             margin-top: 12px;
             padding-top: 12px;
             border-top: 1px solid var(--gray-200);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        /* Compact icon-only status picker */
+        .stage-picker-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            border: 1px solid var(--gray-300);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            margin-left: auto;
+            padding: 0;
+        }
+
+        .stage-color-saved { color: #1e40af; background: #dbeafe; border-color: #bfdbfe; }
+        .stage-color-applied { color: #1e40af; background: #dbeafe; border-color: #bfdbfe; }
+        .stage-color-phone_screen { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+        .stage-color-interview { color: #065f46; background: #d1fae5; border-color: #a7f3d0; }
+        .stage-color-executive_call { color: #065f46; background: #d1fae5; border-color: #a7f3d0; }
+        .stage-color-offered { color: #c2410c; background: #ffedd5; border-color: #fed7aa; }
+        .stage-color-rejected { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-withdrawn { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-not_pursuing { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-closed { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+
+        .stage-menu {
+            margin-top: 8px;
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+            overflow: hidden;
+        }
+
+        .stage-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 7px 12px;
+            border: none;
+            background: white;
+            cursor: pointer;
+            font-size: 0.78rem;
+            color: var(--gray-700);
+            text-align: left;
+        }
+
+        .stage-option i {
+            width: 14px;
+            text-align: center;
+        }
+
+        .stage-option:hover {
+            background: var(--gray-50);
+        }
+
+        .stage-option.selected {
+            background: #eff6ff;
+            color: var(--primary);
+            font-weight: 600;
         }
 
         .btn-sm {
@@ -2538,7 +2604,6 @@ The AI will automatically extract:
         }
 
         function renderJobItem(job) {
-            const statusClass = statusClasses[job.stage] || 'status-applied';
             const isArchived = ['rejected', 'withdrawn', 'closed'].includes(job.stage);
             const hasGeneratedResume = job.generated_resume && (typeof job.generated_resume === 'string' ? job.generated_resume.trim() : (job.generated_resume.content && job.generated_resume.content.trim()));
             const hasCoverLetter = job.has_cover_letter;
@@ -2551,7 +2616,6 @@ The AI will automatically extract:
                             <div class="job-title">${escapeHtml(job.position)}</div>
                             <div class="job-company">${escapeHtml(job.company)}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${escapeHtml(publicJobId)}</span>` : ''}</div>
                         </div>
-                        <span class="status-badge ${statusClass}">${statusLabels[job.stage] || escapeHtml(job.stage)}</span>
                     </div>
                     <div class="job-meta">
                         <span><i class="fas fa-map-marker-alt"></i> ${job.location ? escapeHtml(job.location) : 'N/A'}</span>
@@ -2561,29 +2625,24 @@ The AI will automatically extract:
                     <div class="job-actions">
                         ${hasGeneratedResume ? `
                             <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openResumeEditor(${job.id})" title="View/Edit Resume">
-                                <i class="fas fa-file-alt"></i> View Resume
+                                <i class="fas fa-file-alt"></i> Resume
                             </button>
                         ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateResume(${job.id})" title="Generate Resume">
-                                <i class="fas fa-magic"></i> Generate Resume
+                                <i class="fas fa-magic"></i> Resume
                             </button>
                         `}
                         ${hasCoverLetter ? `
                             <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="View/Edit Cover Letter">
-                                <i class="fas fa-envelope-open-text"></i> View Cover Letter
+                                <i class="fas fa-envelope-open-text"></i> Cover Letter
                             </button>
                         ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateCoverLetter(${job.id})" title="Create Cover Letter">
-                                <i class="fas fa-magic"></i> Create Cover Letter
+                                <i class="fas fa-magic"></i> Cover Letter
                             </button>
                         `}
-                        <select class="job-stage-select" data-job-id="${job.id}" style="font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); cursor: pointer;"
-                            onclick="event.stopPropagation();"
-                        >
-                            ${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${job.stage === value ? 'selected' : ''}>${label}</option>`).join('')}
-                        </select>
-                        <button class="btn-sm btn-archive ${isArchived ? 'btn-success' : 'btn-secondary'}" onclick="event.stopPropagation(); toggleArchive(${job.id})" title="${isArchived ? 'Unarchive' : 'Archive'}">
-                            <i class="fas ${isArchived ? 'fa-folder-open' : 'fa-archive'}"></i>
+                        <button type="button" class="stage-picker-btn stage-color-${job.stage}" data-job-id="${job.id}" title="Change status">
+                            <i class="fas ${STAGE_ICONS[job.stage] || 'fa-circle'}"></i>
                         </button>
                     </div>
                 </div>
@@ -2626,14 +2685,50 @@ The AI will automatically extract:
 
         // Wire up stage dropdowns after each render.
         function attachStageSelectHandlers() {
-            document.querySelectorAll('.job-stage-select').forEach(select => {
-                select.addEventListener('change', async (e) => {
+            document.querySelectorAll('.stage-picker-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const jobId = parseInt(select.dataset.jobId);
-                    const newStage = select.value;
-                    await quickStatus(jobId, newStage);
+                    toggleStageMenu(parseInt(btn.dataset.jobId), btn);
                 });
             });
+        }
+
+        // Icon-only status picker: toggle a small menu of all 10 stages.
+        function toggleStageMenu(jobId, btn) {
+            const existing = document.querySelector('.stage-menu');
+            if (existing) existing.remove();
+            if (!btn) return;
+
+            const card = btn.closest('.job-item');
+            if (!card) return;
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            const menu = document.createElement('div');
+            menu.className = 'stage-menu';
+            menu.innerHTML = Object.entries(statusLabels).map(([value, label]) => `
+                <button type="button" class="stage-option ${job.stage === value ? 'selected' : ''}" data-stage="${value}">
+                    <i class="fas ${STAGE_ICONS[value] || 'fa-circle'}"></i>${label}
+                </button>
+            `).join('');
+            card.appendChild(menu);
+
+            menu.querySelectorAll('.stage-option').forEach(opt => {
+                opt.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    menu.remove();
+                    await quickStatus(jobId, opt.dataset.stage);
+                });
+            });
+
+            // Close the menu when clicking anywhere else.
+            const close = (e) => {
+                if (!menu.contains(e.target) && e.target !== btn) {
+                    menu.remove();
+                    document.removeEventListener('click', close);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', close), 0);
         }
 
         // Show detail modal
