@@ -1586,7 +1586,7 @@ The AI will automatically extract:
 
         function addNotification(notification) {
             // Avoid duplicates for the same job+version.
-            const exists = notifications.some(n => n.jobId === notification.jobId && n.version === notification.version);
+            const exists = notifications.some(n => n.jobId === notification.jobId && n.version === notification.version && (n.kind || 'resume') === (notification.kind || 'resume'));
             if (exists) return;
             notifications.unshift(notification);
             persistNotifications();
@@ -1641,7 +1641,7 @@ The AI will automatically extract:
                             <div style="font-size: 0.85rem; color: var(--gray-800); font-weight: ${n.viewed ? '400' : '600'};">${escapeHtml(title)}</div>
                             <div style="font-size: 0.7rem; color: var(--gray-500);">${new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                         </div>
-                        <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)} — v${n.version}</div>
+                        <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)}${typeof n.version === 'number' ? ` — v${n.version}` : ''}</div>
                     </div>`;
             }).join('');
 
@@ -1652,6 +1652,8 @@ The AI will automatically extract:
                     markNotificationsViewedForJob(jobId);
                     if (kind === 'cover-letter') {
                         openCoverLetterEditor(jobId);
+                    } else if (kind.startsWith('score')) {
+                        openJobScores(jobId);
                     } else {
                         openResumeEditor(jobId);
                     }
@@ -1676,11 +1678,26 @@ The AI will automatically extract:
             if (titleEl) titleEl.textContent = 'Generating';
             if (countEl) countEl.textContent = entries.length + (entries.length === 1 ? ' in progress' : ' in progress');
             list.innerHTML = entries.map(g => {
-                const kindLabel = g.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
-                const kindIcon = g.kind === 'cover-letter' ? 'fa-envelope' : 'fa-file-alt';
-                const onClick = g.kind === 'cover-letter'
-                    ? `openCoverLetterEditor(${g.jobId})`
-                    : `openResumeEditor(${g.jobId})`;
+                let kindLabel, kindIcon, onClick;
+                if (g.kind === 'cover-letter') {
+                    kindLabel = 'Cover letter';
+                    kindIcon = 'fa-envelope';
+                    onClick = `openCoverLetterEditor(${g.jobId})`;
+                } else if (g.kind === 'resume') {
+                    kindLabel = 'Resume';
+                    kindIcon = 'fa-file-alt';
+                    onClick = `openResumeEditor(${g.jobId})`;
+                } else if (g.kind.startsWith('score')) {
+                    const isPanel = g.kind.includes('panel');
+                    const isCover = g.kind.includes('cover-letter');
+                    kindLabel = (isPanel ? 'Industry Panel' : 'ATS Score') + (isCover ? ' — Cover Letter' : ' — Resume');
+                    kindIcon = isPanel ? 'fa-users' : 'fa-shield-halved';
+                    onClick = `openJobScores(${g.jobId})`;
+                } else {
+                    kindLabel = 'Resume';
+                    kindIcon = 'fa-file-alt';
+                    onClick = `openResumeEditor(${g.jobId})`;
+                }
                 const statusColor = g.status === 'error' ? 'var(--danger)' : 'var(--gray-600)';
                 return `
                 <div data-job-id="${g.jobId}" data-kind="${g.kind}"
@@ -3808,10 +3825,11 @@ The AI will automatically extract:
         async function ensureGenerationPoller() {
             if (_generationPollTimer) return;
 
-            const statusEndpoint = (kind, jobId) =>
-                kind === 'cover-letter'
-                    ? `${API_URL}/jobs/${jobId}/generate-cover-letter/status`
-                    : `${API_URL}/jobs/${jobId}/generate-resume/status`;
+            const statusEndpoint = (kind, jobId) => {
+                if (kind === 'cover-letter') return `${API_URL}/jobs/${jobId}/generate-cover-letter/status`;
+                if (kind === 'resume') return `${API_URL}/jobs/${jobId}/generate-resume/status`;
+                return `${API_URL}/jobs/${jobId}/activity-status?activity=${encodeURIComponent(kind)}`;
+            };
 
             const pollLoop = async () => {
                 if (activeGenerations.size === 0) {
@@ -3830,6 +3848,28 @@ The AI will automatically extract:
                         const result = await r.json();
 
                         if (result.status === 'completed') {
+                            if (gen.kind.startsWith('score')) {
+                                const isPanel = gen.kind.includes('panel');
+                                const isCover = gen.kind.includes('cover-letter');
+                                const kindTitle = isPanel ? 'Industry panel score ready' : 'ATS score ready';
+                                const artifactLabel = isCover ? 'cover letter' : 'resume';
+                                addNotification({
+                                    id: `score-${gen.kind}-${jobId}-${Date.now()}`,
+                                    jobId,
+                                    kind: gen.kind,
+                                    title: `${kindTitle} — ${artifactLabel}`,
+                                    company: gen.company,
+                                    position: gen.position,
+                                    version: 1,
+                                    model: result.model_used || gen.model || getDefaultModel(),
+                                    timestamp: new Date().toISOString(),
+                                    viewed: false,
+                                });
+                                const scoresPanel = document.getElementById('artifact-panel-scores');
+                                if (scoresPanel && scoresPanel.style.display === 'block') loadScores(jobId);
+                                removeActiveGeneration(jobId, gen.kind);
+                                return { jobId, done: true };
+                            }
                             const job = jobs.find(j => j.id === jobId);
                             if (gen.kind === 'resume' && job) {
                                 job.generated_resume = result.resume;
@@ -3922,7 +3962,7 @@ The AI will automatically extract:
                             return { jobId, done: true };
                         } else if (result.status === 'error') {
                             const genJob = jobs.find(j => j.id === jobId);
-                            const kindLabel = gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
+                            const kindLabel = gen.kind.startsWith('score') ? 'Scoring' : (gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume');
                             setGenerationStatus(jobId, gen.kind, 'error', result.error || 'Generation failed', 0);
                             removeActiveGeneration(jobId, gen.kind);
                             alert(`${kindLabel} generation failed for ${genJob?.position || gen.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
@@ -5056,12 +5096,11 @@ The AI will automatically extract:
         async function scoreAll(jobId) {
             const content = document.getElementById('scores-content');
             content.innerHTML = '<em style="color:var(--gray-500)">Running ATS + industry panel on resume and cover letter... this runs in the background.</em>';
-            // Kick off all four scorings (resume ats, resume panel, cover-letter ats, cover-letter panel) — fire and forget
             try {
                 const jr = await apiFetch(`${API_URL}/jobs/${jobId}`);
                 if (!jr.ok) throw new Error('Could not load job');
                 const job = await jr.json();
-                const tasks = [];
+                const kicks = [];
                 if (job.generated_resume) {
                     const gr = await apiFetch(`${API_URL}/debug/resume/${jobId}`);
                     if (gr.ok) {
@@ -5069,18 +5108,43 @@ The AI will automatically extract:
                         const resumes = (dbg.resumes || []).slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
                         const resumeId = resumes[0] && resumes[0].id;
                         if (resumeId) {
-                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats`, { method: 'POST' }));
-                            tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel`, { method: 'POST' }));
+                            kicks.push({ kind: 'score-resume-ats', url: `${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats` });
+                            kicks.push({ kind: 'score-resume-panel', url: `${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel` });
                         }
                     }
                 }
                 if (job.has_cover_letter && job.cover_letter_id) {
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats`, { method: 'POST' }));
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel`, { method: 'POST' }));
+                    kicks.push({ kind: 'score-cover-letter-ats', url: `${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats` });
+                    kicks.push({ kind: 'score-cover-letter-panel', url: `${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel` });
                 }
-                await Promise.all(tasks.map(p => p.catch(() => null)));
+                const kickable = kicks.filter(k => !activeGenerations.has(_genKey(jobId, k.kind)));
+                if (kickable.length === 0) {
+                    content.innerHTML = '<em style="color:var(--gray-500)">Nothing to score — generate a resume first.</em>';
+                    return;
+                }
+                await Promise.all(kickable.map(async k => {
+                    const r = await apiFetch(k.url, { method: 'POST' });
+                    if (r.ok) {
+                        activeGenerations.set(_genKey(jobId, k.kind), {
+                            jobId, kind: k.kind,
+                            company: job.company || '', position: job.position || '',
+                            step: 'Queued', percent: 0, status: 'processing', startTime: Date.now(),
+                        });
+                    }
+                }));
+                renderGenerationProgress();
+                ensureGenerationPoller();
                 content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
             } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
+        async function openJobScores(jobId) {
+            await showDetail(jobId);
+            setTimeout(() => {
+                const tab = document.querySelector(`.artifact-tab[data-artifact-tab="scores"][data-job-id="${jobId}"]`);
+                if (tab) tab.click();
+                loadScores(jobId);
+            }, 50);
         }
 
         async function loadScores(jobId) {
@@ -5136,6 +5200,7 @@ The AI will automatically extract:
         window.deleteCoverLetter = deleteCoverLetter;
         window.loadScores = loadScores;
         window.scoreAll = scoreAll;
+        window.openJobScores = openJobScores;
         window.deleteExampleCoverLetter = deleteExampleCoverLetter;
         window.escapeHtml = escapeHtml;
 

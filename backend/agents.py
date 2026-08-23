@@ -1164,10 +1164,13 @@ Output format: Plain text cover letter only. No JSON, no markdown."""
         """
         agent_prompt = self._load_agent_prompt("ats-expert")
         kind_label = "cover letter" if artifact_type == "cover_letter" else "resume"
+        today_str = datetime.utcnow().strftime("%B %d, %Y")
 
         prompt = f"""{agent_prompt}
 
 Evaluate this {kind_label} against the job description for ATS compatibility.
+
+TODAY_DATE: {today_str}
 
 {kind_label.upper()}:
 {artifact_content[:16000]}
@@ -1232,10 +1235,13 @@ Scores are 0-10 (one decimal allowed). Return ONLY the JSON."""
         """
         agent_prompt = self._load_agent_prompt("industry-panel")
         kind_label = "cover letter" if artifact_type == "cover_letter" else "resume"
+        today_str = datetime.utcnow().strftime("%B %d, %Y")
 
         prompt = f"""{agent_prompt}
 
 Review this {kind_label} against the job description. Target role: {target_role or "Not specified"}.
+
+TODAY_DATE: {today_str}
 
 {kind_label.upper()}:
 {artifact_content[:16000]}
