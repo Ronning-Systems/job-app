@@ -7,8 +7,8 @@
 #
 # The my-stack deploy script (deploy-patrick-mini.sh) is
 # responsible for:
-#   - building the job-app, jobapp-fetcher, and
-#     jobapp-secrets-fetcher images on patrick-mini (via
+#   - building the job-app, ronning/fetcher, and
+#     ronning/secrets-fetcher images on patrick-mini (via
 #     `docker buildx build` in each build context)
 #   - creating the external `proxy` Docker network (one-time setup)
 #   - substituting ${IMAGE_TAG} below (envsubst whitelist in
@@ -20,25 +20,24 @@
 # only on the `proxy` network and are reachable from other
 # `proxy`-attached containers (api) by service name. The api
 # service is reachable from Traefik via the dynamic file
-# provider in portainer/traefik.dynamic.yml (no Traefik labels
-# here — Docker Desktop on WSL2 doesn't reliably expose the
-# Docker socket to Traefik's Docker provider).
+# provider in appliances/traefik-custom/traefik.dynamic.yml (no
+# Traefik labels here — Docker Desktop on WSL2 doesn't reliably
+# expose the Docker socket to Traefik's Docker provider).
 #
 # Image names: every service in this compose references an image
 # that the my-stack deploy script builds and tags. The api image
-# is built from this repo's Dockerfile. The fetcher sidecar is
-# built from my-stack/portainer/ — the single source of truth for
-# sidecar source. (The my-stack deploy script's step 6 enforces
-# this with a drift check that fails the build if a sidecar
-# subtree re-appears in either repo.) The context mapping is:
+# is built from this repo's Dockerfile. The fetcher + secrets-fetcher
+# sidecars are built from my-stack/appliances/ — the single source
+# of truth for universal appliance source as of the 2026-08-24
+# appliance-convention move. The context mapping is:
 #   api:             Dockerfile at job-app repo root
-#   secrets-fetcher: my-stack/portainer/secrets/ (stays in my-stack —
-#                    Vault bootstrap, not a job-app sidecar)
-#   fetcher:         my-stack/portainer/fetcher.{Dockerfile,py}
+#   secrets-fetcher: my-stack/appliances/secrets-fetcher/
+#                    (Vault bootstrap, not a job-app sidecar)
+#   fetcher:         my-stack/appliances/fetcher/
 
 x-api-image: &api-image job-app:${IMAGE_TAG:-local}
-x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
-x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
+x-fetcher-image: &fetcher-image ronning/fetcher:${IMAGE_TAG:-local}
+x-secrets-fetcher-image: &secrets-fetcher-image ronning/secrets-fetcher:${IMAGE_TAG:-local}
 
 services:
   postgres:
@@ -92,7 +91,7 @@ services:
     # Same posture as the original my-stack fetcher.yml: read-only
     # root fs, tmpfs /tmp for chromium scratch, no-new-privileges,
     # all caps dropped. Chromium is launched with
-    # --disable-dev-shm-usage (see my-stack/portainer/fetcher.py) so
+    # --disable-dev-shm-usage (see my-stack/appliances/fetcher/fetcher.py) so
     # the 64MB default /dev/shm doesn't OOM on large pages.
     read_only: true
     security_opt:
@@ -138,7 +137,7 @@ services:
         condition: service_completed_successfully
       fetcher:
         condition: service_healthy
-    # Routing is defined in portainer/traefik.dynamic.yml (file
+    # Routing is defined in appliances/traefik-custom/traefik.dynamic.yml (file
     # provider), NOT via Traefik labels — Docker Desktop on WSL2
     # doesn't reliably expose the Docker socket to Traefik's
     # Docker provider.

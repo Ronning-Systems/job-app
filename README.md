@@ -221,7 +221,7 @@ five stacks (network → traefik → fetcher → vault → jobapp) with `docker 
 ### Rollback
 
 ```bash
-git checkout <sha> -- portainer/
+git checkout <sha> -- compose/ appliances/
 ./deploy-patrick-mini.sh
 ```
 

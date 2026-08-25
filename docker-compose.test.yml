@@ -16,22 +16,23 @@
 #   - the Vault stack (one Vault for all envs; the test
 #     secrets-fetcher reads from a different KV path:
 #     secret/jobapp/test vs. secret/jobapp/prod for prod)
-#   - the image tags (jobapp:local, jobapp-fetcher:local, etc.)
+#   - the image tags (job-app:local, ronning/fetcher:local, etc.)
 #   - the LE cert behavior (Traefik pulls certs on first HTTPS
 #     request to joblign.test.ronning.systems)
 #
-# The my-stack deploy script (deploy-patrick-mini.sh) renders this
-# file when DEPLOY_ENV=test, and renders docker-compose.yml when
-# DEPLOY_ENV is unset or DEPLOY_ENV=prod. Both files declare the
-# same four services (postgres, secrets-fetcher, fetcher, api);
-# the only differences are names + paths.
+# The my-stack deploy script (deploy-patrick-mini-test.sh) renders this
+# file when bringing up the test env, and renders docker-compose.yml
+# when bringing up prod. Both files declare the same four services
+# (postgres, secrets-fetcher, fetcher, api); the only differences are
+# names + paths.
 #
 # Traefik routes joblign.test.ronning.systems to http://jobapp-test:8080
-# via the jobapp-test router in portainer/traefik.dynamic.yml.
+# via the jobapp-test router in
+# appliances/traefik-test/traefik.dynamic.test.yml.
 
 x-api-image: &api-image job-app:${IMAGE_TAG:-local}
-x-fetcher-image: &fetcher-image jobapp-fetcher:${IMAGE_TAG:-local}
-x-secrets-fetcher-image: &secrets-fetcher-image jobapp-secrets-fetcher:${IMAGE_TAG:-local}
+x-fetcher-image: &fetcher-image ronning/fetcher:${IMAGE_TAG:-local}
+x-secrets-fetcher-image: &secrets-fetcher-image ronning/secrets-fetcher:${IMAGE_TAG:-local}
 
 services:
   postgres-test:
@@ -177,7 +178,7 @@ services:
 
 networks:
   # proxy-test is the test-env-only Docker network, created by
-  # my-stack/portainer/stacks/network-test.yml. All test-env
+  # my-stack/compose/network-test.yml. All test-env
   # services attach to this. The test Traefik (also on this
   # network) routes joblign.test.ronning.systems to the api-test
   # container.

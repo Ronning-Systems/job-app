@@ -57,7 +57,7 @@ deploy — the goal is to unblock production.
 
 The test stack attaches to TWO Docker networks:
 
-- `proxy-test` — created by `my-stack/portainer/stacks/network-test.yml`.
+- `proxy-test` — created by `my-stack/compose/network-test.yml`.
   Carries the test Traefik + all 5 test services. Test-side DNS
   isolation: api-test cannot resolve prod's services by name.
 - `proxy` — the SHARED prod network. Only `secrets-fetcher-test`
@@ -142,9 +142,9 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   resume was generated before template atoms existed — Regenerate once
   to populate both tabs from a single LLM call.
 - **README/agent docs**: `docs/superpowers/` contains design notes. The
-  Portainer / patrick-mini deploy spec
-  (`2026-07-18-portainer-deploy-design.md`) describes the architecture
-  still in use today. Older Cloud Run specs/plans are historical only.
+  appliance-convention spec (`docs/appliance-spec.md` in my-stack)
+  describes the current architecture; the older
+  (`2026-07-18-portainer-deploy-design.md`) is historical only.
 
 ## New tables, agents, and routes (2026-07-25 redesign)
 
@@ -175,10 +175,10 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   Indeed).
 - **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
   headless-browser sidecar. The sidecar source lives in
-  `my-stack/portainer/fetcher.{py,Dockerfile}` (the single source of
-  truth — the my-stack deploy script's step 6 enforces this with a
-  drift check that fails the build if `sidecars/fetcher/` re-appears
-  in this repo). Internal-only; not exposed by Traefik.
+  `my-stack/appliances/fetcher/` (the single source of truth — the
+  my-stack deploy script's step 6 enforces this with a drift check
+  that fails the build if `sidecars/fetcher/` re-appears in this
+  repo). Internal-only; not exposed by Traefik.
 - **Parser extensions** in `backend/job_parser.py`:
   `_extract_pay_range`, `_extract_application_deadline`, improved
   `_extract_credentials`. Structured pay range (`pay_range_min/max`,
@@ -187,22 +187,21 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
 - **Sort-by-attribute:** `GET /api/jobs?sort=company|position|location|
   stage|applied_date|deadline|pay|created&order=asc|desc`.
 
-## Sidecars (added 2026-07-28)
+## Sidecars (added 2026-07-28, refactored 2026-08-24 to appliance convention)
 
-- **Source location:** sidecar source (Dockerfile + .py) lives in
-  `my-stack/portainer/`, NOT in this repo. As of 2026-08-22, the
-  single source of truth is `my-stack/portainer/<name>.{py,Dockerfile}`.
+- **Source location:** sidecar source (Dockerfile + .py + manifest)
+  lives in `my-stack/appliances/<name>/`, NOT in this repo. As of
+  2026-08-24, the single source of truth is the appliance convention
+  under `my-stack/appliances/<name>/` (Dockerfile + source + manifest).
   The my-stack deploy script (`deploy-patrick-mini.sh` step 6) enforces
   this with a drift check that fails the build if a `sidecars/<name>/`
   subtree re-appears in either repo.
-- **Layout:** `my-stack/portainer/fetcher.{py,Dockerfile}`
-  — flat-file layout (Dockerfile + source side-by-side, not nested in a
-  `<name>/` subdir). The Dockerfile is named `<name>.Dockerfile` in
-  the repo so it can be built by name; the deploy script renames it to
-  plain `Dockerfile` in the per-sidecar build context on the host.
-- **Build:** the my-stack deploy script rsyncs each sidecar's
-  Dockerfile + source to patrick-mini and runs `docker buildx build`.
-  Image names are `jobapp-<name>:${IMAGE_TAG}`.
+- **Layout:** `my-stack/appliances/<name>/{Dockerfile,<name>.py,
+  appliance.md[,requirements.txt,tests/]}` — every appliance is a
+  directory with the Dockerfile inside (not a flat-file tree).
+- **Build:** the my-stack deploy script rsyncs each appliance's tree
+  to patrick-mini and runs `docker buildx build`. Image names are
+  `ronning/<name>:${IMAGE_TAG}`.
 - **Runtime:** declared in this repo's `docker-compose.yml`
   (prod) and `docker-compose.test.yml` (test) as services on
   the external `proxy` network. The my-stack deploy script
