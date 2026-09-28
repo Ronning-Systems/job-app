@@ -76,13 +76,6 @@ async def _probe_fetcher() -> tuple[str, str | None]:
     return await _http_probe(url + "/healthz")
 
 
-async def _probe_autoapply() -> tuple[str, str | None]:
-    """Auto-apply sidecar. HMAC-authed for write routes, but healthz
-    is unauthenticated like the fetcher's."""
-    url = os.getenv("AUTOAPPLY_URL", "http://auto-apply:8081").rstrip("/")
-    return await _http_probe(url + "/healthz")
-
-
 async def _probe_postgres() -> tuple[str, str | None]:
     """``SELECT 1`` against the live DB. Returns (status, detail).
 
@@ -121,7 +114,6 @@ async def _probe_ollama() -> tuple[str, str | None]:
 
 PROBES: dict[str, Callable[[], Awaitable[tuple[str, str | None]]]] = {
     "fetcher": _probe_fetcher,
-    "autoapply": _probe_autoapply,
     "postgres": _probe_postgres,
     "ollama": _probe_ollama,
 }

@@ -179,25 +179,37 @@
             background: var(--primary-dark);
         }
 
-        /* Main Grid */
+        /* Kanban Board */
         .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
+            display: flex;
+            gap: 16px;
+            align-items: stretch;
+            overflow-x: auto;
+            padding: 4px 4px 12px 4px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--gray-300) transparent;
         }
 
-        @media (max-width: 1024px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
+        .grid::-webkit-scrollbar {
+            height: 10px;
         }
 
-        /* Cards */
+        .grid::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: 6px;
+        }
+
+        /* Cards (kanban columns) */
         .card {
             background: white;
             border-radius: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             overflow: hidden;
+            flex: 0 0 400px;
+            min-width: 360px;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 180px);
         }
 
         .card-header {
@@ -251,6 +263,9 @@
 
         .card-content {
             padding: 16px;
+            overflow-y: auto;
+            flex: 1 1 auto;
+            min-height: 0;
         }
 
         /* Job List */
@@ -331,6 +346,72 @@
             margin-top: 12px;
             padding-top: 12px;
             border-top: 1px solid var(--gray-200);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        /* Compact icon-only status picker */
+        .stage-picker-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            border: 1px solid var(--gray-300);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            margin-left: auto;
+            padding: 0;
+        }
+
+        .stage-color-saved { color: #1e40af; background: #dbeafe; border-color: #bfdbfe; }
+        .stage-color-applied { color: #1e40af; background: #dbeafe; border-color: #bfdbfe; }
+        .stage-color-phone_screen { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+        .stage-color-interview { color: #065f46; background: #d1fae5; border-color: #a7f3d0; }
+        .stage-color-executive_call { color: #065f46; background: #d1fae5; border-color: #a7f3d0; }
+        .stage-color-offered { color: #c2410c; background: #ffedd5; border-color: #fed7aa; }
+        .stage-color-rejected { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-withdrawn { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-not_pursuing { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .stage-color-closed { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+
+        .stage-menu {
+            margin-top: 8px;
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+            overflow: hidden;
+        }
+
+        .stage-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 7px 12px;
+            border: none;
+            background: white;
+            cursor: pointer;
+            font-size: 0.78rem;
+            color: var(--gray-700);
+            text-align: left;
+        }
+
+        .stage-option i {
+            width: 14px;
+            text-align: center;
+        }
+
+        .stage-option:hover {
+            background: var(--gray-50);
+        }
+
+        .stage-option.selected {
+            background: #eff6ff;
+            color: var(--primary);
+            font-weight: 600;
         }
 
         .btn-sm {
@@ -884,6 +965,8 @@
                 </button>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="search-input" placeholder="Search company, position, location..."
+                    style="font-size: 0.9rem; padding: 6px 12px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); width: 240px;">
                 <label for="sort-select" style="font-size: 0.85rem; color: var(--gray-600); font-weight: 500;">Sort:</label>
                 <select id="sort-select" style="font-size: 0.9rem; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800);">
                     <option value="created">Date added</option>
@@ -902,51 +985,143 @@
         </div>
 
         <div class="grid">
-            <!-- Saved Applications -->
-            <div class="card" id="saved-card">
+            <!-- Saved -->
+            <div class="card" id="stage-card-saved">
                 <div class="card-header" data-toggle="saved">
                     <div class="card-title">
                         <i class="fas fa-chevron-right chevron"></i>
                         <h2><i class="fas fa-bookmark"></i> Saved</h2>
                     </div>
-                    <span class="count" id="saved-count">0</span>
+                    <span class="count" id="stage-count-saved">0</span>
                 </div>
                 <div class="card-content">
-                    <div class="job-list" id="savedJobs">
-                        <!-- Job items will be populated by JS -->
-                    </div>
+                    <div class="job-list" id="stageJobs-saved"></div>
                 </div>
             </div>
 
-            <!-- In Progress Applications -->
-            <div class="card" id="inprogress-card">
-                <div class="card-header" data-toggle="inprogress">
+            <!-- Applied -->
+            <div class="card" id="stage-card-applied">
+                <div class="card-header" data-toggle="applied">
                     <div class="card-title">
                         <i class="fas fa-chevron-right chevron"></i>
-                        <h2><i class="fas fa-rocket"></i> In Progress</h2>
+                        <h2><i class="fas fa-paper-plane"></i> Applied</h2>
                     </div>
-                    <span class="count" id="inprogress-count">0</span>
+                    <span class="count" id="stage-count-applied">0</span>
                 </div>
                 <div class="card-content">
-                    <div class="job-list" id="inprogressJobs">
-                        <!-- Job items will be populated by JS -->
-                    </div>
+                    <div class="job-list" id="stageJobs-applied"></div>
                 </div>
             </div>
 
-            <!-- Archived Applications -->
-            <div class="card collapsed" id="archived-card">
-                <div class="card-header" data-toggle="archived">
+            <!-- Phone Screen -->
+            <div class="card" id="stage-card-phone_screen">
+                <div class="card-header" data-toggle="phone_screen">
                     <div class="card-title">
                         <i class="fas fa-chevron-right chevron"></i>
-                        <h2><i class="fas fa-archive"></i> Archived</h2>
+                        <h2><i class="fas fa-phone"></i> Phone Screen</h2>
                     </div>
-                    <span class="count" id="archived-count">0</span>
+                    <span class="count" id="stage-count-phone_screen">0</span>
                 </div>
                 <div class="card-content">
-                    <div class="job-list" id="archivedJobs">
-                        <!-- Archived job items -->
+                    <div class="job-list" id="stageJobs-phone_screen"></div>
+                </div>
+            </div>
+
+            <!-- Interview -->
+            <div class="card" id="stage-card-interview">
+                <div class="card-header" data-toggle="interview">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-comments"></i> Interview</h2>
                     </div>
+                    <span class="count" id="stage-count-interview">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-interview"></div>
+                </div>
+            </div>
+
+            <!-- Executive Call -->
+            <div class="card" id="stage-card-executive_call">
+                <div class="card-header" data-toggle="executive_call">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-user-tie"></i> Executive Call</h2>
+                    </div>
+                    <span class="count" id="stage-count-executive_call">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-executive_call"></div>
+                </div>
+            </div>
+
+            <!-- Offered -->
+            <div class="card" id="stage-card-offered">
+                <div class="card-header" data-toggle="offered">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-handshake"></i> Offered</h2>
+                    </div>
+                    <span class="count" id="stage-count-offered">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-offered"></div>
+                </div>
+            </div>
+
+            <!-- Rejected -->
+            <div class="card" id="stage-card-rejected">
+                <div class="card-header" data-toggle="rejected">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-xmark"></i> Rejected</h2>
+                    </div>
+                    <span class="count" id="stage-count-rejected">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-rejected"></div>
+                </div>
+            </div>
+
+            <!-- Withdrawn -->
+            <div class="card" id="stage-card-withdrawn">
+                <div class="card-header" data-toggle="withdrawn">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-undo"></i> Withdrawn</h2>
+                    </div>
+                    <span class="count" id="stage-count-withdrawn">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-withdrawn"></div>
+                </div>
+            </div>
+
+            <!-- Not Pursuing -->
+            <div class="card" id="stage-card-not_pursuing">
+                <div class="card-header" data-toggle="not_pursuing">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-ban"></i> Not Pursuing</h2>
+                    </div>
+                    <span class="count" id="stage-count-not_pursuing">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-not_pursuing"></div>
+                </div>
+            </div>
+
+            <!-- Closed -->
+            <div class="card" id="stage-card-closed">
+                <div class="card-header" data-toggle="closed">
+                    <div class="card-title">
+                        <i class="fas fa-chevron-right chevron"></i>
+                        <h2><i class="fas fa-archive"></i> Closed</h2>
+                    </div>
+                    <span class="count" id="stage-count-closed">0</span>
+                </div>
+                <div class="card-content">
+                    <div class="job-list" id="stageJobs-closed"></div>
                 </div>
             </div>
         </div>
@@ -1573,8 +1748,16 @@ The AI will automatically extract:
         let pendingTemplate = null;
 
         // ---------- Generation progress + notifications ---------------------
-        // Active generations keyed by jobId. Each entry: {jobId, company, position, step, percent, status}.
+        // Active generations keyed by `${jobId}:${kind}` (kind is 'resume' or
+        // 'cover-letter') so a resume generation does NOT block a cover-letter
+        // click on the same job, and vice versa. Each entry: {jobId, kind,
+        // company, position, step, percent, status}. The previous single-key
+        // design caused the cover-letter handler to short-circuit whenever a
+        // resume was already queued for the same jobId (the guard checked
+        // `activeGenerations.has(jobId)` and bailed without ever hitting the
+        // API).
         let activeGenerations = new Map();
+        const _genKey = (jobId, kind) => `${jobId}:${kind}`;
         // Notifications for completed generations not yet viewed. Each entry:
         // {id, jobId, company, position, version, model, timestamp, viewed}.
         let notifications = JSON.parse(localStorage.getItem('joblignNotifications')) || [];
@@ -1585,7 +1768,7 @@ The AI will automatically extract:
 
         function addNotification(notification) {
             // Avoid duplicates for the same job+version.
-            const exists = notifications.some(n => n.jobId === notification.jobId && n.version === notification.version);
+            const exists = notifications.some(n => n.jobId === notification.jobId && n.version === notification.version && (n.kind || 'resume') === (notification.kind || 'resume'));
             if (exists) return;
             notifications.unshift(notification);
             persistNotifications();
@@ -1640,7 +1823,7 @@ The AI will automatically extract:
                             <div style="font-size: 0.85rem; color: var(--gray-800); font-weight: ${n.viewed ? '400' : '600'};">${escapeHtml(title)}</div>
                             <div style="font-size: 0.7rem; color: var(--gray-500);">${new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                         </div>
-                        <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)} — v${n.version}</div>
+                        <div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(label)}${typeof n.version === 'number' ? ` — v${n.version}` : ''}</div>
                     </div>`;
             }).join('');
 
@@ -1651,6 +1834,8 @@ The AI will automatically extract:
                     markNotificationsViewedForJob(jobId);
                     if (kind === 'cover-letter') {
                         openCoverLetterEditor(jobId);
+                    } else if (kind.startsWith('score')) {
+                        openJobScores(jobId);
                     } else {
                         openResumeEditor(jobId);
                     }
@@ -1675,11 +1860,26 @@ The AI will automatically extract:
             if (titleEl) titleEl.textContent = 'Generating';
             if (countEl) countEl.textContent = entries.length + (entries.length === 1 ? ' in progress' : ' in progress');
             list.innerHTML = entries.map(g => {
-                const kindLabel = g.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
-                const kindIcon = g.kind === 'cover-letter' ? 'fa-envelope' : 'fa-file-alt';
-                const onClick = g.kind === 'cover-letter'
-                    ? `openCoverLetterEditor(${g.jobId})`
-                    : `openResumeEditor(${g.jobId})`;
+                let kindLabel, kindIcon, onClick;
+                if (g.kind === 'cover-letter') {
+                    kindLabel = 'Cover letter';
+                    kindIcon = 'fa-envelope';
+                    onClick = `openCoverLetterEditor(${g.jobId})`;
+                } else if (g.kind === 'resume') {
+                    kindLabel = 'Resume';
+                    kindIcon = 'fa-file-alt';
+                    onClick = `openResumeEditor(${g.jobId})`;
+                } else if (g.kind.startsWith('score')) {
+                    const isPanel = g.kind.includes('panel');
+                    const isCover = g.kind.includes('cover-letter');
+                    kindLabel = (isPanel ? 'Industry Panel' : 'ATS Score') + (isCover ? ' — Cover Letter' : ' — Resume');
+                    kindIcon = isPanel ? 'fa-users' : 'fa-shield-halved';
+                    onClick = `openJobScores(${g.jobId})`;
+                } else {
+                    kindLabel = 'Resume';
+                    kindIcon = 'fa-file-alt';
+                    onClick = `openResumeEditor(${g.jobId})`;
+                }
                 const statusColor = g.status === 'error' ? 'var(--danger)' : 'var(--gray-600)';
                 return `
                 <div data-job-id="${g.jobId}" data-kind="${g.kind}"
@@ -1701,8 +1901,8 @@ The AI will automatically extract:
             }).join('');
         }
 
-        function setGenerationStatus(jobId, status, step, percent) {
-            const g = activeGenerations.get(jobId);
+        function setGenerationStatus(jobId, kind, status, step, percent) {
+            const g = activeGenerations.get(_genKey(jobId, kind));
             if (!g) return;
             g.status = status;
             g.step = step;
@@ -1710,8 +1910,8 @@ The AI will automatically extract:
             renderGenerationProgress();
         }
 
-        function removeActiveGeneration(jobId) {
-            activeGenerations.delete(jobId);
+        function removeActiveGeneration(jobId, kind) {
+            activeGenerations.delete(_genKey(jobId, kind));
             renderGenerationProgress();
         }
 
@@ -1789,6 +1989,7 @@ The AI will automatically extract:
         let currentJobId = null;
         let currentSort = 'created';
         let currentOrder = 'desc';
+        let currentSearch = '';
 
         // DOM Elements
         const jobModal = document.getElementById('job-modal');
@@ -2203,6 +2404,7 @@ The AI will automatically extract:
                 const params = new URLSearchParams();
                 if (currentSort) params.set('sort', currentSort);
                 if (currentOrder) params.set('order', currentOrder);
+                if (currentSearch) params.set('search', currentSearch);
                 const qs = params.toString();
                 const response = await apiFetch(`${API_URL}/jobs${qs ? '?' + qs : ''}`);
                 if (!response.ok) throw new Error('Failed to fetch jobs');
@@ -2233,84 +2435,65 @@ The AI will automatically extract:
         }
 
         // Render jobs
+        const BOARD_STAGES = ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered', 'rejected', 'withdrawn', 'not_pursuing', 'closed'];
+        const ACTIVE_STAGES = ['saved', 'applied', 'phone_screen', 'interview', 'executive_call', 'offered'];
+        const ARCHIVED_STAGES = ['rejected', 'withdrawn', 'not_pursuing', 'closed'];
+        const STAGE_ICONS = {
+            saved: 'fa-bookmark',
+            applied: 'fa-paper-plane',
+            phone_screen: 'fa-phone',
+            interview: 'fa-comments',
+            executive_call: 'fa-user-tie',
+            offered: 'fa-handshake',
+            rejected: 'fa-xmark',
+            withdrawn: 'fa-undo',
+            not_pursuing: 'fa-ban',
+            closed: 'fa-archive'
+        };
+
         function renderJobs() {
-            const savedContainer = document.getElementById('savedJobs');
-            const inprogressContainer = document.getElementById('inprogressJobs');
-            const archivedContainer = document.getElementById('archivedJobs');
-            const savedCard = document.getElementById('saved-card');
-            const inprogressCard = document.getElementById('inprogress-card');
-            const archivedCard = document.getElementById('archived-card');
-
-            // Saved: not yet applied.
-            const savedJobsAll = jobs.filter(j => j.stage === 'saved');
-            // In progress: applied and moving through the pipeline.
-            const inprogressJobsAll = jobs.filter(j =>
-                ['applied', 'phone_screen', 'interview', 'executive_call', 'offered'].includes(j.stage)
-            );
-            // Archived/dispositioned: rejected, withdrawn, closed, not_pursuing.
-            const archivedJobsAll = jobs.filter(j =>
-                ['rejected', 'withdrawn', 'closed', 'not_pursuing'].includes(j.stage)
-            );
-
-            // Apply selected filter to decide which list(s) to show and what goes in them.
-            let savedJobs = [];
-            let inprogressJobs = [];
-            let archivedJobs = [];
-
+            // Which stages are visible under the current filter?
+            let visibleStages;
             if (currentFilter === 'all') {
-                savedJobs = savedJobsAll;
-                inprogressJobs = inprogressJobsAll;
-                archivedJobs = archivedJobsAll;
+                visibleStages = BOARD_STAGES;
             } else if (currentFilter === 'active') {
-                savedJobs = savedJobsAll;
-                inprogressJobs = inprogressJobsAll;
+                visibleStages = ACTIVE_STAGES;
             } else if (currentFilter === 'interview') {
-                inprogressJobs = inprogressJobsAll.filter(j => ['interview', 'executive_call'].includes(j.stage));
+                visibleStages = ['interview', 'executive_call'];
             } else if (currentFilter === 'offer') {
-                inprogressJobs = inprogressJobsAll.filter(j => j.stage === 'offered');
+                visibleStages = ['offered'];
             } else if (currentFilter === 'archived') {
-                archivedJobs = archivedJobsAll;
+                visibleStages = ARCHIVED_STAGES;
+            } else {
+                visibleStages = BOARD_STAGES;
             }
 
-            // Render saved
-            savedContainer.innerHTML = savedJobs.length ? savedJobs.map(job => renderJobItem(job)).join('') : `
-                <div class="empty-state">
-                    <i class="fas fa-bookmark"></i>
-                    <p>No saved jobs</p>
-                    ${savedJobsAll.length === 0 && inprogressJobsAll.length === 0 && archivedJobsAll.length === 0 ? renderFirstTimeGuide() : ''}
-                </div>
-            `;
+            const jobsByStage = {};
+            for (const stage of BOARD_STAGES) jobsByStage[stage] = jobs.filter(j => j.stage === stage);
 
-            // Render in progress
-            inprogressContainer.innerHTML = inprogressJobs.length ? inprogressJobs.map(job => renderJobItem(job)).join('') : `
-                <div class="empty-state">
-                    <i class="fas fa-rocket"></i>
-                    <p>No jobs in progress</p>
-                </div>
-            `;
+            for (const stage of BOARD_STAGES) {
+                const card = document.getElementById('stage-card-' + stage);
+                const container = document.getElementById('stageJobs-' + stage);
+                const countEl = document.getElementById('stage-count-' + stage);
+                if (!card || !container) continue;
 
-            // Render archived
-            archivedContainer.innerHTML = archivedJobs.length ? archivedJobs.map(job => renderJobItem(job)).join('') : `
-                <div class="empty-state">
-                    <i class="fas fa-archive"></i>
-                    <p>No archived applications</p>
-                </div>
-            `;
+                card.style.display = visibleStages.includes(stage) ? '' : 'none';
+
+                const stageJobs = jobsByStage[stage];
+                container.innerHTML = stageJobs.length ? stageJobs.map(job => renderJobItem(job)).join('') : `
+                    <div class="empty-state">
+                        <i class="fas ${STAGE_ICONS[stage] || 'fa-circle'}"></i>
+                        <p>No ${statusLabels[stage] || stage} jobs</p>
+                        ${stage === 'saved' && jobs.length === 0 ? renderFirstTimeGuide() : ''}
+                    </div>
+                `;
+                if (countEl) countEl.textContent = stageJobs.length;
+            }
 
             // First-time user has no jobs anywhere — trigger welcome modal once.
-            if (savedJobsAll.length === 0 && inprogressJobsAll.length === 0 && archivedJobsAll.length === 0) {
+            if (jobs.length === 0) {
                 maybeShowWelcomeModal();
             }
-
-            // Show/hide cards based on current filter
-            if (savedCard) savedCard.style.display = (currentFilter === 'all' || currentFilter === 'active') ? '' : 'none';
-            if (inprogressCard) inprogressCard.style.display = (currentFilter === 'all' || currentFilter === 'active' || currentFilter === 'interview' || currentFilter === 'offer') ? '' : 'none';
-            if (archivedCard) archivedCard.style.display = (currentFilter === 'all' || currentFilter === 'archived') ? '' : 'none';
-
-            // Update counts
-            document.getElementById('saved-count').textContent = savedJobs.length;
-            document.getElementById('inprogress-count').textContent = inprogressJobs.length;
-            document.getElementById('archived-count').textContent = archivedJobs.length;
 
             // Update stats
             updateStats();
@@ -2464,7 +2647,6 @@ The AI will automatically extract:
         }
 
         function renderJobItem(job) {
-            const statusClass = statusClasses[job.stage] || 'status-applied';
             const isArchived = ['rejected', 'withdrawn', 'closed'].includes(job.stage);
             const hasGeneratedResume = job.generated_resume && (typeof job.generated_resume === 'string' ? job.generated_resume.trim() : (job.generated_resume.content && job.generated_resume.content.trim()));
             const hasCoverLetter = job.has_cover_letter;
@@ -2474,42 +2656,36 @@ The AI will automatically extract:
                 <div class="job-item ${isArchived ? 'archived' : ''}" data-id="${job.id}">
                     <div class="job-main">
                         <div>
-                            <div class="job-title">${job.position}</div>
-                            <div class="job-company">${job.company}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${publicJobId}</span>` : ''}</div>
+                            <div class="job-title">${escapeHtml(job.position)}</div>
+                            <div class="job-company">${escapeHtml(job.company)}${publicJobId ? `<span style="margin-left: 8px; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.75rem; padding: 1px 6px; background: var(--gray-100); border-radius: 4px; vertical-align: middle;" title="Globally unique Job ID">${escapeHtml(publicJobId)}</span>` : ''}</div>
                         </div>
-                        <span class="status-badge ${statusClass}">${statusLabels[job.stage] || job.stage}</span>
                     </div>
                     <div class="job-meta">
-                        <span><i class="fas fa-map-marker-alt"></i> ${job.location || 'N/A'}</span>
+                        <span><i class="fas fa-map-marker-alt"></i> ${job.location ? escapeHtml(job.location) : 'N/A'}</span>
                         <span><i class="fas fa-calendar"></i> ${formatDate(job.applied_date || job.created_at)}</span>
-                        ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${job.remote}</span>` : ''}
+                        ${job.remote ? `<span><i class="fas fa-laptop-house"></i> ${escapeHtml(job.remote)}</span>` : ''}
                     </div>
                     <div class="job-actions">
                         ${hasGeneratedResume ? `
                             <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openResumeEditor(${job.id})" title="View/Edit Resume">
-                                <i class="fas fa-file-alt"></i> View Resume
+                                <i class="fas fa-file-alt"></i> Resume
                             </button>
                         ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateResume(${job.id})" title="Generate Resume">
-                                <i class="fas fa-magic"></i> Generate Resume
+                                <i class="fas fa-magic"></i> Resume
                             </button>
                         `}
                         ${hasCoverLetter ? `
                             <button class="btn-sm btn-primary" onclick="event.stopPropagation(); openCoverLetterEditor(${job.id})" title="View/Edit Cover Letter">
-                                <i class="fas fa-envelope-open-text"></i> View Cover Letter
+                                <i class="fas fa-envelope-open-text"></i> Cover Letter
                             </button>
                         ` : `
                             <button class="btn-sm btn-info" onclick="event.stopPropagation(); generateCoverLetter(${job.id})" title="Create Cover Letter">
-                                <i class="fas fa-magic"></i> Create Cover Letter
+                                <i class="fas fa-magic"></i> Cover Letter
                             </button>
                         `}
-                        <select class="job-stage-select" data-job-id="${job.id}" style="font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 6px; background: white; color: var(--gray-800); cursor: pointer;"
-                            onclick="event.stopPropagation();"
-                        >
-                            ${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${job.stage === value ? 'selected' : ''}>${label}</option>`).join('')}
-                        </select>
-                        <button class="btn-sm btn-archive ${isArchived ? 'btn-success' : 'btn-secondary'}" onclick="event.stopPropagation(); toggleArchive(${job.id})" title="${isArchived ? 'Unarchive' : 'Archive'}">
-                            <i class="fas ${isArchived ? 'fa-folder-open' : 'fa-archive'}"></i>
+                        <button type="button" class="stage-picker-btn stage-color-${job.stage}" data-job-id="${job.id}" title="Change status">
+                            <i class="fas ${STAGE_ICONS[job.stage] || 'fa-circle'}"></i>
                         </button>
                     </div>
                 </div>
@@ -2552,14 +2728,50 @@ The AI will automatically extract:
 
         // Wire up stage dropdowns after each render.
         function attachStageSelectHandlers() {
-            document.querySelectorAll('.job-stage-select').forEach(select => {
-                select.addEventListener('change', async (e) => {
+            document.querySelectorAll('.stage-picker-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const jobId = parseInt(select.dataset.jobId);
-                    const newStage = select.value;
-                    await quickStatus(jobId, newStage);
+                    toggleStageMenu(parseInt(btn.dataset.jobId), btn);
                 });
             });
+        }
+
+        // Icon-only status picker: toggle a small menu of all 10 stages.
+        function toggleStageMenu(jobId, btn) {
+            const existing = document.querySelector('.stage-menu');
+            if (existing) existing.remove();
+            if (!btn) return;
+
+            const card = btn.closest('.job-item');
+            if (!card) return;
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            const menu = document.createElement('div');
+            menu.className = 'stage-menu';
+            menu.innerHTML = Object.entries(statusLabels).map(([value, label]) => `
+                <button type="button" class="stage-option ${job.stage === value ? 'selected' : ''}" data-stage="${value}">
+                    <i class="fas ${STAGE_ICONS[value] || 'fa-circle'}"></i>${label}
+                </button>
+            `).join('');
+            card.appendChild(menu);
+
+            menu.querySelectorAll('.stage-option').forEach(opt => {
+                opt.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    menu.remove();
+                    await quickStatus(jobId, opt.dataset.stage);
+                });
+            });
+
+            // Close the menu when clicking anywhere else.
+            const close = (e) => {
+                if (!menu.contains(e.target) && e.target !== btn) {
+                    menu.remove();
+                    document.removeEventListener('click', close);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', close), 0);
         }
 
         // Show detail modal
@@ -2593,12 +2805,13 @@ The AI will automatically extract:
 
             const statusClass = statusClasses[fullJob.stage] || 'status-applied';
             const publicJobId = fullJob.public_job_id || '';
+            const safeJobUrl = fullJob.job_url && /^https?:\/\//i.test(fullJob.job_url) ? escapeHtml(fullJob.job_url) : null;
             content.innerHTML = `
                 <div class="job-detail-header">
-                    <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || fullJob.stage}</span>
-                    <h3>${fullJob.position}</h3>
-                    <div class="company">${fullJob.company}</div>
-                    ${publicJobId ? `<div style="margin-top: 8px;"><span style="display: inline-block; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 3px 8px; background: var(--gray-100); border-radius: 4px;" title="Globally unique Job ID"><i class="fas fa-fingerprint" style="margin-right: 6px;"></i>${publicJobId}</span></div>` : ''}
+                    <span class="status-badge ${statusClass}">${statusLabels[fullJob.stage] || escapeHtml(fullJob.stage)}</span>
+                    <h3>${escapeHtml(fullJob.position)}</h3>
+                    <div class="company">${escapeHtml(fullJob.company)}</div>
+                    ${publicJobId ? `<div style="margin-top: 8px;"><span style="display: inline-block; color: var(--gray-500); font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 0.8rem; padding: 3px 8px; background: var(--gray-100); border-radius: 4px;" title="Globally unique Job ID"><i class="fas fa-fingerprint" style="margin-right: 6px;"></i>${escapeHtml(publicJobId)}</span></div>` : ''}
                 </div>
 
                 <div class="detail-section">
@@ -2606,11 +2819,11 @@ The AI will automatically extract:
                     <div class="detail-grid">
                         <div class="detail-item">
                             <div class="label">Location</div>
-                            <div class="value">${fullJob.location || 'Not specified'}</div>
+                            <div class="value">${fullJob.location ? escapeHtml(fullJob.location) : 'Not specified'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="label">Salary</div>
-                            <div class="value">${fullJob.salary || 'Not specified'}</div>
+                            <div class="value">${fullJob.salary ? escapeHtml(fullJob.salary) : 'Not specified'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="label">Applied Date</div>
@@ -2618,7 +2831,7 @@ The AI will automatically extract:
                         </div>
                         <div class="detail-item">
                             <div class="label">Job URL</div>
-                            <div class="value">${fullJob.job_url ? `<a href="${fullJob.job_url}" target="_blank">View Posting</a>` : 'N/A'}</div>
+                            <div class="value">${safeJobUrl ? `<a href="${safeJobUrl}" target="_blank" rel="noopener noreferrer">View Posting</a>` : 'N/A'}</div>
                         </div>
                     </div>
                 </div>
@@ -2629,7 +2842,7 @@ The AI will automatically extract:
                         // Try parsed description first, fallback to raw
                         const desc = fullJob.job_description_parsed || fullJob.job_description_raw;
                         if (desc && desc.trim()) {
-                            return `<div style="color: var(--gray-600); white-space: pre-wrap; line-height: 1.6;">${desc}</div>`;
+                            return `<div style="color: var(--gray-600); white-space: pre-wrap; line-height: 1.6;">${escapeHtml(desc)}</div>`;
                         }
                         return `<div style="color: var(--gray-500); font-style: italic;">No job description available.</div>`;
                     })()}
@@ -2660,7 +2873,7 @@ The AI will automatically extract:
                             <div style="margin-bottom: 12px;">
                                 <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Must Have:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                    ${mustHave.map(r => `<li>${r}</li>`).join('')}
+                                    ${mustHave.map(r => `<li>${escapeHtml(r)}</li>`).join('')}
                                 </ul>
                             </div>
                             ` : ''}
@@ -2668,7 +2881,7 @@ The AI will automatically extract:
                             <div>
                                 <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 6px;">Nice to Have:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                    ${niceToHave.map(r => `<li>${r}</li>`).join('')}
+                                    ${niceToHave.map(r => `<li>${escapeHtml(r)}</li>`).join('')}
                                 </ul>
                             </div>
                             ` : ''}
@@ -2693,7 +2906,7 @@ The AI will automatically extract:
                         }
                         return `
                             <ul style="margin: 0; padding-left: 20px; color: var(--gray-600);">
-                                ${resp.map(r => `<li style="margin-bottom: 4px;">${r}</li>`).join('')}
+                                ${resp.map(r => `<li style="margin-bottom: 4px;">${escapeHtml(r)}</li>`).join('')}
                             </ul>
                         `;
                     })()}
@@ -2716,7 +2929,7 @@ The AI will automatically extract:
                         }
                         return `
                             <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
-                                ${kw.map(k => `<span style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">${k}</span>`).join('')}
+                                ${kw.map(k => `<span style="background: var(--primary); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">${escapeHtml(k)}</span>`).join('')}
                             </div>
                         `;
                     })()}
@@ -2730,9 +2943,9 @@ The AI will automatically extract:
                     <div style="display: none; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: var(--gray-700); background: white; padding: 12px; border-radius: 4px; max-height: 300px; overflow-y: auto;">
 <strong>job_description_parsed:</strong> ${fullJob.job_description_parsed ? 'present (' + fullJob.job_description_parsed.length + ' chars)' : 'MISSING'}
 <strong>job_description_raw:</strong> ${fullJob.job_description_raw ? 'present (' + fullJob.job_description_raw.length + ' chars)' : 'MISSING'}
-<strong>requirements:</strong> ${JSON.stringify(fullJob.requirements, null, 2)}
-<strong>responsibilities:</strong> ${JSON.stringify(fullJob.responsibilities, null, 2)}
-<strong>keywords:</strong> ${JSON.stringify(fullJob.keywords, null, 2)}
+<strong>requirements:</strong> ${escapeHtml(JSON.stringify(fullJob.requirements, null, 2))}
+<strong>responsibilities:</strong> ${escapeHtml(JSON.stringify(fullJob.responsibilities, null, 2))}
+<strong>keywords:</strong> ${escapeHtml(JSON.stringify(fullJob.keywords, null, 2))}
                     </div>
                 </div>
 
@@ -2751,7 +2964,7 @@ The AI will automatically extract:
                                 <i class="fas fa-wand-magic-sparkles"></i> ${fullJob.generated_resume ? 'Regenerate' : 'Generate'} Resume
                             </button>
                         </div>
-                        <div id="resume-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.generated_resume || '<em style="color:var(--gray-500)">No resume generated yet.</em>'}</div>
+                        <div id="resume-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.generated_resume ? escapeHtml(fullJob.generated_resume) : '<em style="color:var(--gray-500)">No resume generated yet.</em>'}</div>
                         <div style="margin-top:10px;">
                             <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise resume):</label>
                             <textarea id="resume-feedback-input" rows="2" placeholder="e.g. Make the lead bullet more quantified; emphasize the AWS migration." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
@@ -2772,7 +2985,7 @@ The AI will automatically extract:
                             </button>
                             ${fullJob.has_cover_letter ? `<button class="btn btn-danger" onclick="deleteCoverLetter(${fullJob.id})" style="font-size:0.85rem; padding:6px 12px;">Delete</button>` : ''}
                         </div>
-                        <div id="cover-letter-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.cover_letter || '<em style="color:var(--gray-500)">No cover letter generated yet.</em>'}</div>
+                        <div id="cover-letter-content" style="white-space: pre-wrap; background: var(--gray-50); padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; font-size:0.85rem;">${fullJob.cover_letter ? escapeHtml(fullJob.cover_letter) : '<em style="color:var(--gray-500)">No cover letter generated yet.</em>'}</div>
                         <div style="margin-top:10px;">
                             <label style="font-size:0.85rem; font-weight:600; color:var(--gray-700);">Feedback to agent (revise cover letter):</label>
                             <textarea id="cover-letter-feedback-input" rows="2" placeholder="e.g. Open with the specific company problem; cut the second paragraph." style="width:100%; margin-top:4px; padding:8px; border:1px solid var(--gray-300); border-radius:6px; font-size:0.85rem;"></textarea>
@@ -2801,7 +3014,7 @@ The AI will automatically extract:
 
                 <div class="detail-section">
                     <h4>Notes</h4>
-                    <div class="notes-box">${fullJob.notes || 'No notes added.'}</div>
+                    <div class="notes-box">${fullJob.notes ? escapeHtml(fullJob.notes) : 'No notes added.'}</div>
                 </div>
 
                 <div class="detail-section">
@@ -2812,7 +3025,7 @@ The AI will automatically extract:
                                 <div class="timeline-dot"></div>
                                 <div class="timeline-content">
                                     <div class="timeline-date">${formatDate(h.date)}</div>
-                                    <div class="timeline-text">${h.notes || h.text}</div>
+                                    <div class="timeline-text">${escapeHtml(h.notes || h.text)}</div>
                                 </div>
                             </div>
                         `).join('') || '<p style="color: var(--gray-500);">No history yet.</p>'}
@@ -3747,8 +3960,10 @@ The AI will automatically extract:
                 return;
             }
 
-            // Avoid double-kicking the same job while one is already running.
-            if (activeGenerations.has(jobId)) {
+            // Avoid double-kicking the same jobId + kind while one is already running.
+            // Key is (jobId, kind) so a cover-letter generation does NOT block a
+            // resume click on the same job (and vice versa).
+            if (activeGenerations.has(_genKey(jobId, 'resume'))) {
                 console.log('[generateResume] Generation already in progress for job', jobId);
                 return;
             }
@@ -3794,7 +4009,7 @@ The AI will automatically extract:
                 }
 
                 // Register this generation for non-blocking tracking.
-                activeGenerations.set(jobId, {
+                activeGenerations.set(_genKey(jobId, 'resume'), {
                     jobId,
                     kind: 'resume',
                     company: job.company,
@@ -3821,10 +4036,11 @@ The AI will automatically extract:
         async function ensureGenerationPoller() {
             if (_generationPollTimer) return;
 
-            const statusEndpoint = (kind, jobId) =>
-                kind === 'cover-letter'
-                    ? `${API_URL}/jobs/${jobId}/generate-cover-letter/status`
-                    : `${API_URL}/jobs/${jobId}/generate-resume/status`;
+            const statusEndpoint = (kind, jobId) => {
+                if (kind === 'cover-letter') return `${API_URL}/jobs/${jobId}/generate-cover-letter/status`;
+                if (kind === 'resume') return `${API_URL}/jobs/${jobId}/generate-resume/status`;
+                return `${API_URL}/jobs/${jobId}/activity-status?activity=${encodeURIComponent(kind)}`;
+            };
 
             const pollLoop = async () => {
                 if (activeGenerations.size === 0) {
@@ -3832,16 +4048,39 @@ The AI will automatically extract:
                     return;
                 }
 
-                const checks = Array.from(activeGenerations.entries()).map(async ([jobId, gen]) => {
+                const checks = Array.from(activeGenerations.entries()).map(async ([_key, gen]) => {
+                    const jobId = gen.jobId;
                     try {
                         const r = await apiFetch(statusEndpoint(gen.kind, jobId));
                         if (!r.ok) {
-                            setGenerationStatus(jobId, 'error', 'Failed to check status', 0);
+                            setGenerationStatus(jobId, gen.kind, 'error', 'Failed to check status', 0);
                             return { jobId, error: 'status check failed' };
                         }
                         const result = await r.json();
 
                         if (result.status === 'completed') {
+                            if (gen.kind.startsWith('score')) {
+                                const isPanel = gen.kind.includes('panel');
+                                const isCover = gen.kind.includes('cover-letter');
+                                const kindTitle = isPanel ? 'Industry panel score ready' : 'ATS score ready';
+                                const artifactLabel = isCover ? 'cover letter' : 'resume';
+                                addNotification({
+                                    id: `score-${gen.kind}-${jobId}-${Date.now()}`,
+                                    jobId,
+                                    kind: gen.kind,
+                                    title: `${kindTitle} — ${artifactLabel}`,
+                                    company: gen.company,
+                                    position: gen.position,
+                                    version: 1,
+                                    model: result.model_used || gen.model || getDefaultModel(),
+                                    timestamp: new Date().toISOString(),
+                                    viewed: false,
+                                });
+                                const scoresPanel = document.getElementById('artifact-panel-scores');
+                                if (scoresPanel && scoresPanel.style.display === 'block') loadScores(jobId);
+                                removeActiveGeneration(jobId, gen.kind);
+                                return { jobId, done: true };
+                            }
                             const job = jobs.find(j => j.id === jobId);
                             if (gen.kind === 'resume' && job) {
                                 job.generated_resume = result.resume;
@@ -3924,7 +4163,7 @@ The AI will automatically extract:
                                 } catch (err) { console.error(err); }
                             }
 
-                            removeActiveGeneration(jobId);
+                            removeActiveGeneration(jobId, gen.kind);
 
                             if (gen.kind === 'resume' && result.structured_empty_ratio >= 0.7 && result.mode !== 'plain') {
                                 setTimeout(() => {
@@ -3934,13 +4173,13 @@ The AI will automatically extract:
                             return { jobId, done: true };
                         } else if (result.status === 'error') {
                             const genJob = jobs.find(j => j.id === jobId);
-                            const kindLabel = gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume';
-                            setGenerationStatus(jobId, 'error', result.error || 'Generation failed', 0);
-                            removeActiveGeneration(jobId);
+                            const kindLabel = gen.kind.startsWith('score') ? 'Scoring' : (gen.kind === 'cover-letter' ? 'Cover letter' : 'Resume');
+                            setGenerationStatus(jobId, gen.kind, 'error', result.error || 'Generation failed', 0);
+                            removeActiveGeneration(jobId, gen.kind);
                             alert(`${kindLabel} generation failed for ${genJob?.position || gen.position || 'job ' + jobId}: ${result.error || 'Unknown error'}`);
                             return { jobId, error: result.error };
                         } else {
-                            setGenerationStatus(jobId, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(jobId)?.percent) || 0);
+                            setGenerationStatus(jobId, gen.kind, result.status, result.step || 'Processing', (result.percent ?? activeGenerations.get(_genKey(jobId, gen.kind))?.percent) || 0);
                             return { jobId, processing: true };
                         }
                     } catch (e) {
@@ -4507,6 +4746,17 @@ The AI will automatically extract:
         });
 
         // ─── Sort dropdown ───
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            let searchTimer = null;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    currentSearch = e.target.value.trim();
+                    fetchJobs();
+                }, 300);
+            });
+        }
         document.getElementById('sort-select').addEventListener('change', async (e) => {
             currentSort = e.target.value;
             await fetchJobs();
@@ -4736,8 +4986,10 @@ The AI will automatically extract:
             const job = jobs.find(j => j.id === jobId);
             if (!job) return;
 
-            // Avoid double-kicking the same job while one is already running.
-            if (activeGenerations.has(jobId)) {
+            // Avoid double-kicking the same jobId + kind while one is already running.
+            // Key is (jobId, kind) so a resume generation does NOT block a
+            // cover-letter click on the same job (and vice versa).
+            if (activeGenerations.has(_genKey(jobId, 'cover-letter'))) {
                 console.log('[generateCoverLetter] Generation already in progress for job', jobId);
                 return;
             }
@@ -4777,7 +5029,7 @@ The AI will automatically extract:
                 }
 
                 // Register this generation for non-blocking tracking.
-                activeGenerations.set(jobId, {
+                activeGenerations.set(_genKey(jobId, 'cover-letter'), {
                     jobId,
                     kind: 'cover-letter',
                     company: job.company,
@@ -5061,24 +5313,55 @@ The AI will automatically extract:
         async function scoreAll(jobId) {
             const content = document.getElementById('scores-content');
             content.innerHTML = '<em style="color:var(--gray-500)">Running ATS + industry panel on resume and cover letter... this runs in the background.</em>';
-            // Kick off all four scorings (resume ats, resume panel, cover-letter ats, cover-letter panel) — fire and forget
             try {
-                // Need resume_id and cover_letter_id — fetch the job detail
                 const jr = await apiFetch(`${API_URL}/jobs/${jobId}`);
                 if (!jr.ok) throw new Error('Could not load job');
                 const job = await jr.json();
-                const tasks = [];
-                if (job.generated_resume && job.resume_id) {
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-ats`, { method: 'POST' }));
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/resumes/${job.resume_id}/score-industry-panel`, { method: 'POST' }));
+                const kicks = [];
+                if (job.generated_resume) {
+                    const gr = await apiFetch(`${API_URL}/debug/resume/${jobId}`);
+                    if (gr.ok) {
+                        const dbg = await gr.json();
+                        const resumes = (dbg.resumes || []).slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+                        const resumeId = resumes[0] && resumes[0].id;
+                        if (resumeId) {
+                            kicks.push({ kind: 'score-resume-ats', url: `${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-ats` });
+                            kicks.push({ kind: 'score-resume-panel', url: `${API_URL}/jobs/${jobId}/resumes/${resumeId}/score-industry-panel` });
+                        }
+                    }
                 }
                 if (job.has_cover_letter && job.cover_letter_id) {
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats`, { method: 'POST' }));
-                    tasks.push(apiFetch(`${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel`, { method: 'POST' }));
+                    kicks.push({ kind: 'score-cover-letter-ats', url: `${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-ats` });
+                    kicks.push({ kind: 'score-cover-letter-panel', url: `${API_URL}/jobs/${jobId}/cover-letters/${job.cover_letter_id}/score-industry-panel` });
                 }
-                await Promise.all(tasks.map(p => p.catch(() => null)));
+                const kickable = kicks.filter(k => !activeGenerations.has(_genKey(jobId, k.kind)));
+                if (kickable.length === 0) {
+                    content.innerHTML = '<em style="color:var(--gray-500)">Nothing to score — generate a resume first.</em>';
+                    return;
+                }
+                await Promise.all(kickable.map(async k => {
+                    const r = await apiFetch(k.url, { method: 'POST' });
+                    if (r.ok) {
+                        activeGenerations.set(_genKey(jobId, k.kind), {
+                            jobId, kind: k.kind,
+                            company: job.company || '', position: job.position || '',
+                            step: 'Queued', percent: 0, status: 'processing', startTime: Date.now(),
+                        });
+                    }
+                }));
+                renderGenerationProgress();
+                ensureGenerationPoller();
                 content.innerHTML = '<em style="color:var(--gray-500)">Scoring started in background. Click "Load scores" in ~30-60s.</em>';
             } catch (err) { content.innerHTML = '<em style="color:var(--danger)">Error: ' + escapeHtml(err.message) + '</em>'; }
+        }
+
+        async function openJobScores(jobId) {
+            await showDetail(jobId);
+            setTimeout(() => {
+                const tab = document.querySelector(`.artifact-tab[data-artifact-tab="scores"][data-job-id="${jobId}"]`);
+                if (tab) tab.click();
+                loadScores(jobId);
+            }, 50);
         }
 
         async function loadScores(jobId) {
@@ -5180,6 +5463,7 @@ The AI will automatically extract:
         window.scoreAll = scoreAll;
         window.loadScoresForEditor = loadScoresForEditor;
         window.scoreAllForEditor = scoreAllForEditor;
+        window.openJobScores = openJobScores;
         window.deleteExampleCoverLetter = deleteExampleCoverLetter;
         window.escapeHtml = escapeHtml;
 

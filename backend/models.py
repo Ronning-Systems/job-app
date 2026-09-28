@@ -93,8 +93,10 @@ class JobApplication(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    # Application tracking
-    stage = Column(String, default="saved")  # saved, applied, phone_screen, interview, executive_call, offered, rejected, withdrawn, closed
+    # Application tracking — 10 stages, matching the frontend dropdown:
+    # saved, applied, phone_screen, interview, executive_call, offered,
+    # rejected, withdrawn, not_pursuing, closed
+    stage = Column(String, default="saved")  # saved, applied, phone_screen, interview, executive_call, offered, rejected, withdrawn, not_pursuing, closed
     applied_date = Column(DateTime)
     response_received = Column(Boolean, default=False)
     response_date = Column(DateTime)

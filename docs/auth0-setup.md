@@ -107,5 +107,6 @@ the deploy. Do NOT edit `static/index.html` directly to set a real
 client ID — the envsubst pass will overwrite it on the next build.
 
 In production these values are also materialized from Vault by the
-`jobapp-secrets-fetcher` sidecar (see `my-stack/portainer/stacks/jobapp.yml`);
+`ronning/secrets-fetcher` sidecar (see `my-stack/appliances/secrets-fetcher/`,
+deployed via `my-stack/compose/jobapp.yml`);
 the deploy orchestrator is `my-stack/deploy-patrick-mini.sh`.

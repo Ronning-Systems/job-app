@@ -221,7 +221,7 @@ five stacks (network → traefik → fetcher → vault → jobapp) with `docker 
 ### Rollback
 
 ```bash
-git checkout <sha> -- portainer/
+git checkout <sha> -- compose/ appliances/
 ./deploy-patrick-mini.sh
 ```
 
@@ -249,8 +249,6 @@ job-app/
 ├── agents/                    # Agent prompt definitions
 │   ├── ats-expert.md
 │   ├── resume-generator.md
-│   ├── hr-professional.md
-│   ├── tech-hiring-manager.md
 │   ├── technical-hiring-manager.md
 │   ├── cover-letter-generator.md   # Cover letter generation + revision
 │   └── industry-panel.md           # 4-persona industry panel scoring

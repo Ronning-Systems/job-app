@@ -13,7 +13,7 @@ psycopg2-binary
 PyJWT[cryptography]>=2.8.0
 alembic==1.13.1
 
-# Test dependencies (used by backend/tests/ + sidecars/*/tests/).
+# Test dependencies (used by backend/tests/).
 # pytest + httpx are already in the runtime deps; pytest is added
 # here so the test suite has a single place to declare its needs.
 pytest==8.3.3

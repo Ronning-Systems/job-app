@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import logging
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from datetime import datetime
 import httpx
 import asyncio
 import json as _json
+from bs4 import BeautifulSoup
 
 from models import (
     init_db,
@@ -170,6 +172,7 @@ class JobDetailResponse(JobResponse):
     history: Optional[list]
     generated_resume: Optional[str]
     cover_letter: Optional[str] = None
+    cover_letter_id: Optional[int] = None
     cover_letter_revisions: Optional[list] = []
 
 
@@ -328,6 +331,11 @@ def get_job(job_id: int, db: Session = Depends(get_db), current_user: User = Dep
 @app.get("/api/debug/resume/{job_id}")
 def debug_resume(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Debug: Check what's actually stored in the GeneratedResume table"""
+    # Enforce ownership: only allow access to resumes for jobs owned by the current user.
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     resumes = db.query(GeneratedResume).filter(GeneratedResume.job_id == job_id).all()
     return {
         "job_id": job_id,
@@ -704,23 +712,27 @@ def update_stage(job_id: int, update: ApplicationUpdate, db: Session = Depends(g
     return format_job_response(job, application, db)
 
 
-# In-memory tracking for background resume generation
-_generation_status = {}  # {job_id: {"status": "processing"|"completed"|"error", "error": str, "version": int, "resume_id": int}}
+# In-memory tracking for background activities (resume generation, cover letter
+# generation, and ATS/industry-panel scoring). Keyed by (job_id, activity) so
+# concurrent activities on the same job don't clobber each other. Each value:
+# {"status": "processing"|"completed"|"error", "activity": str, "error": str, ...}
+_generation_status = {}
 
 
-def _set_generation_status(job_id: int, status: str, **kwargs):
-    """Thread-safe helper to update the in-memory generation status."""
-    _generation_status[job_id] = {
+def _set_generation_status(job_id: int, activity: str, status: str, **kwargs):
+    """Thread-safe helper to update the in-memory status for an activity."""
+    _generation_status[(job_id, activity)] = {
         "status": status,
+        "activity": activity,
         "updated_at": datetime.utcnow().isoformat(),
         **kwargs,
     }
 
 
-def _progress(job_id: int, step: str, percent: int):
-    """Post a progress update for a running generation."""
-    _set_generation_status(job_id, "processing", step=step, percent=percent)
-    logger.info(f"[generate-resume-progress] job_id={job_id} step={step} percent={percent}")
+def _progress(job_id: int, activity: str, step: str, percent: int):
+    """Post a progress update for a running activity."""
+    _set_generation_status(job_id, activity, "processing", step=step, percent=percent)
+    logger.info(f"[progress] job_id={job_id} activity={activity} step={step} percent={percent}")
 
 
 def _do_generate_resume(job_id: int, user_id: int, job_description: str, example_resumes: list, template, target_role: str, model_override: str, atoms: Optional[list] = None):
@@ -729,12 +741,12 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
     import time
     overall_start = time.monotonic()
     try:
-        _progress(job_id, "Preparing inputs", 5)
+        _progress(job_id, "resume", "Preparing inputs", 5)
         # Run the async agent in a new event loop (NO DB session held during generation)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            _progress(job_id, "Generating resume content", 25)
+            _progress(job_id, "resume", "Generating resume content", 25)
             gen_start = time.monotonic()
             resume_result = loop.run_until_complete(
                 agent_service.generate_resume(
@@ -750,14 +762,14 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             gen_ms = int((time.monotonic() - gen_start) * 1000)
             llm_ms = resume_result.get("llm_duration_ms")
             logger.info(f"[generate-resume-bg] job_id={job_id} agent path: {gen_ms}ms (LLM call: {llm_ms}ms)")
-            _progress(job_id, "Processing generated content", 65)
+            _progress(job_id, "resume", "Processing generated content", 65)
         finally:
             loop.close()
 
         resume_content = resume_result.get("content", _json.dumps(resume_result))
         structured_content = resume_result.get("structured_content")  # may be None
 
-        _progress(job_id, "Saving resume revision", 85)
+        _progress(job_id, "resume", "Saving resume revision", 85)
         # Now open a DB session ONLY to save the result (short-lived)
         db = SessionLocal()
         try:
@@ -873,6 +885,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             total_ms = int((time.monotonic() - overall_start) * 1000)
             _set_generation_status(
                 job_id,
+                "resume",
                 "completed",
                 resume_id=generated_resume.id,
                 version=len(generated_resume.revisions) if generated_resume.revisions else 1,
@@ -893,7 +906,7 @@ def _do_generate_resume(job_id: int, user_id: int, job_description: str, example
             db.close()
     except Exception as e:
         logger.error(f"[generate-resume-bg] Error for job {job_id}: {e}", exc_info=True)
-        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
+        _set_generation_status(job_id, "resume", "error", error=str(e), step="Error", percent=0)
 
 
 @app.post("/api/jobs/{job_id}/generate-resume")
@@ -997,7 +1010,7 @@ async def generate_job_resume(
     logger.info(f"[generate-resume] Using model: {actual_model} (override={model_override})")
 
     # Launch background generation
-    _set_generation_status(job_id, "processing", step="Queued", percent=0)
+    _set_generation_status(job_id, "resume", "processing", step="Queued", percent=0)
     background_tasks.add_task(
         _do_generate_resume,
         job_id=job_id,
@@ -1023,7 +1036,7 @@ async def get_generate_resume_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    status = _generation_status.get(job_id, {"status": "unknown"})
+    status = _generation_status.get((job_id, "resume"), {"status": "unknown"})
 
     # If completed, return the full result
     if status.get("status") == "completed":
@@ -1387,7 +1400,7 @@ async def _do_generate_cover_letter(job_id: int, user_id: int, job_description: 
     """Background cover letter generation (mirrors _do_generate_resume)."""
     db = SessionLocal()
     try:
-        _progress(job_id, "Generating cover letter", 25)
+        _progress(job_id, "cover-letter", "Generating cover letter", 25)
         result = await agent_service.generate_cover_letter(
             job_description=job_description,
             resume_content=resume_content,
@@ -1398,11 +1411,11 @@ async def _do_generate_cover_letter(job_id: int, user_id: int, job_description: 
             model_override=model_override,
         )
         if "error" in result:
-            _set_generation_status(job_id, "error", error=result["error"], step="Error", percent=0)
+            _set_generation_status(job_id, "cover-letter", "error", error=result["error"], step="Error", percent=0)
             return
 
         content = result.get("content", "")
-        _progress(job_id, "Saving cover letter", 85)
+        _progress(job_id, "cover-letter", "Saving cover letter", 85)
 
         existing = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).first()
         if existing:
@@ -1440,10 +1453,10 @@ async def _do_generate_cover_letter(job_id: int, user_id: int, job_description: 
 
         db.commit()
         db.refresh(generated)
-        _set_generation_status(job_id, "completed", cover_letter_id=generated.id, version=len(generated.revisions), step="Done", percent=100)
+        _set_generation_status(job_id, "cover-letter", "completed", cover_letter_id=generated.id, version=len(generated.revisions), step="Done", percent=100)
     except Exception as e:
         logger.error(f"[generate-cover-letter-bg] Error for job {job_id}: {e}", exc_info=True)
-        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
+        _set_generation_status(job_id, "cover-letter", "error", error=str(e), step="Error", percent=0)
     finally:
         db.close()
 
@@ -1469,7 +1482,7 @@ async def generate_job_cover_letter(job_id: int, request: dict, background_tasks
 
     model_override = request.get("model")
 
-    _set_generation_status(job_id, "processing", step="Queued", percent=0)
+    _set_generation_status(job_id, "cover-letter", "processing", step="Queued", percent=0)
     background_tasks.add_task(
         _do_generate_cover_letter,
         job_id=job_id,
@@ -1492,7 +1505,7 @@ async def get_generate_cover_letter_status(job_id: int, db: Session = Depends(ge
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    status = _generation_status.get(job_id, {"status": "unknown"})
+    status = _generation_status.get((job_id, "cover-letter"), {"status": "unknown"})
     if status.get("status") == "completed":
         latest = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.job_id == job_id).order_by(GeneratedCoverLetter.updated_at.desc()).first()
         if latest:
@@ -1655,11 +1668,11 @@ def export_cover_letter_docx(
 
 # ---- Scoring agents: ATS + industry panel -----------------------------
 
-async def _do_score(job_id: int, user_id: int, artifact_type: str, artifact_id: int, score_type: str, artifact_content: str, job_description: str, target_role: Optional[str]):
+async def _do_score(job_id: int, user_id: int, artifact_type: str, artifact_id: int, score_type: str, artifact_content: str, job_description: str, target_role: Optional[str], activity: str):
     """Background scoring (ATS or industry panel) for a resume or cover letter."""
     db = SessionLocal()
     try:
-        _set_generation_status(job_id, "processing", step=f"Scoring ({score_type})", percent=10)
+        _set_generation_status(job_id, activity, "processing", step=f"Scoring ({score_type})", percent=10)
         if score_type == "ats":
             result = await agent_service.score_ats(artifact_type, artifact_content, job_description)
         else:
@@ -1679,10 +1692,10 @@ async def _do_score(job_id: int, user_id: int, artifact_type: str, artifact_id: 
         db.add(score)
         db.commit()
         db.refresh(score)
-        _set_generation_status(job_id, "completed", score_id=score.id, score_type=score_type, step="Done", percent=100)
+        _set_generation_status(job_id, activity, "completed", score_id=score.id, score_type=score_type, model_used=result.get("model_used"), step="Done", percent=100)
     except Exception as e:
         logger.error(f"[score-bg] Error {score_type} for job {job_id}: {e}", exc_info=True)
-        _set_generation_status(job_id, "error", error=str(e), step="Error", percent=0)
+        _set_generation_status(job_id, activity, "error", error=str(e), step="Error", percent=0)
     finally:
         db.close()
 
@@ -1707,8 +1720,8 @@ async def score_resume_ats(job_id: int, resume_id: int, background_tasks: Backgr
     resume = db.query(GeneratedResume).filter(GeneratedResume.id == resume_id, GeneratedResume.job_id == job_id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    _set_generation_status(job_id, "processing", step="Scoring (ats)", percent=0)
-    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="ats", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    _set_generation_status(job_id, "score-resume-ats", "processing", step="Scoring (ats)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="ats", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position, activity="score-resume-ats")
     return {"job_id": job_id, "status": "processing", "score_type": "ats"}
 
 
@@ -1721,8 +1734,8 @@ async def score_resume_panel(job_id: int, resume_id: int, background_tasks: Back
     resume = db.query(GeneratedResume).filter(GeneratedResume.id == resume_id, GeneratedResume.job_id == job_id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    _set_generation_status(job_id, "processing", step="Scoring (industry_panel)", percent=0)
-    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="industry_panel", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    _set_generation_status(job_id, "score-resume-panel", "processing", step="Scoring (industry_panel)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="resume", artifact_id=resume.id, score_type="industry_panel", artifact_content=resume.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position, activity="score-resume-panel")
     return {"job_id": job_id, "status": "processing", "score_type": "industry_panel"}
 
 
@@ -1735,8 +1748,8 @@ async def score_cover_letter_ats(job_id: int, cl_id: int, background_tasks: Back
     cl = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.id == cl_id, GeneratedCoverLetter.job_id == job_id).first()
     if not cl:
         raise HTTPException(status_code=404, detail="Cover letter not found")
-    _set_generation_status(job_id, "processing", step="Scoring (ats)", percent=0)
-    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="ats", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    _set_generation_status(job_id, "score-cover-letter-ats", "processing", step="Scoring (ats)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="ats", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position, activity="score-cover-letter-ats")
     return {"job_id": job_id, "status": "processing", "score_type": "ats"}
 
 
@@ -1749,9 +1762,18 @@ async def score_cover_letter_panel(job_id: int, cl_id: int, background_tasks: Ba
     cl = db.query(GeneratedCoverLetter).filter(GeneratedCoverLetter.id == cl_id, GeneratedCoverLetter.job_id == job_id).first()
     if not cl:
         raise HTTPException(status_code=404, detail="Cover letter not found")
-    _set_generation_status(job_id, "processing", step="Scoring (industry_panel)", percent=0)
-    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="industry_panel", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position)
+    _set_generation_status(job_id, "score-cover-letter-panel", "processing", step="Scoring (industry_panel)", percent=0)
+    background_tasks.add_task(_do_score, job_id=job_id, user_id=current_user.id, artifact_type="cover_letter", artifact_id=cl.id, score_type="industry_panel", artifact_content=cl.current_content, job_description=job.job_description_parsed or job.job_description_raw, target_role=job.position, activity="score-cover-letter-panel")
     return {"job_id": job_id, "status": "processing", "score_type": "industry_panel"}
+
+
+@app.get("/api/jobs/{job_id}/activity-status")
+def get_activity_status(job_id: int, activity: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Poll status for any background activity (resume, cover-letter, or scoring)."""
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _generation_status.get((job_id, activity), {"status": "unknown", "activity": activity})
 
 
 @app.get("/api/jobs/{job_id}/scores")
@@ -1787,6 +1809,39 @@ def get_job_scores(job_id: int, artifact_type: Optional[str] = None, db: Session
 
 
 # ---- URL-only job creation (httpx first, fetcher sidecar fallback) ----
+
+# If a direct httpx fetch comes back with a body that is just a JS-SPA shell
+# (Nuxt/Next/React/Vue roots present but no rendered content) the parser will
+# produce an empty/unknown result. The fetcher sidecar renders the page with
+# a headless browser, so route those cases through it as well.
+# A page is considered a "shell" if, after stripping <script>/<style>, the
+# visible text is very short AND a known SPA root marker is present. This
+# avoids false positives on legitimately text-light job posts.
+_SHELL_TEXT_THRESHOLD = 250
+_SPA_ROOT_RE = re.compile(
+    r'<div\s+id="(?:__nuxt|__next|root|app|app-root)"\s*></div>',
+    re.IGNORECASE,
+)
+
+
+def _looks_like_spa_shell(html_content: str) -> bool:
+    """Return True if the HTML is a JS-SPA shell with no rendered content.
+
+    Mirrors the kind of body served by Nuxt SSR with data-ssr="false" (e.g.
+    providence.jobs), where httpx sees a 200 with a near-empty body and
+    Playwright is required to actually render the page.
+    """
+    if not html_content:
+        return True
+    soup = BeautifulSoup(html_content, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    text = soup.get_text(separator=" ", strip=True)
+    if len(text) >= _SHELL_TEXT_THRESHOLD:
+        return False
+    # Short text + a known SPA root marker in the original HTML -> shell.
+    return bool(_SPA_ROOT_RE.search(html_content))
+
 
 @app.post("/api/jobs/from-url")
 async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -1825,9 +1880,11 @@ async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, 
     except Exception as e:
         fetch_error = str(e)
 
-    # Attempt 2: fetcher sidecar fallback (Playwright) on 403/blocked/empty
+    # Attempt 2: fetcher sidecar fallback (Playwright) on 403/blocked/empty,
+    # or when the direct fetch came back as a JS-SPA shell that the parser
+    # can't extract any text from (e.g. Nuxt SSR with data-ssr="false").
     fetcher_url = os.getenv("FETCHER_URL", "http://fetcher:8080")
-    if (not html_content or fetch_error) and fetcher_url:
+    if fetcher_url and ((not html_content or fetch_error) or _looks_like_spa_shell(html_content or "")):
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 r = await client.post(f"{fetcher_url}/fetch", json={"url": url}, headers={"Content-Type": "application/json"})
@@ -1836,7 +1893,15 @@ async def create_job_from_url(request: dict, background_tasks: BackgroundTasks, 
                 html_content = data.get("html")
                 fetch_error = None
         except Exception as e:
-            # If the sidecar isn't reachable, keep the original error
+            # Sidecar failed (unreachable, 5xx, bad response, etc.). If the
+            # original httpx fetch was itself a JS-SPA shell, falling back
+            # to that shell would just have the parser "succeed" on the
+            # page title and fabricate a bogus job — so drop the shell
+            # and surface a 502 instead. Keep the original error message
+            # if we had one (so the user sees the sidecar failure
+            # explicitly when the direct fetch was also empty/blocked).
+            if not html_content or _looks_like_spa_shell(html_content or ""):
+                html_content = None
             if not fetch_error:
                 fetch_error = f"fetcher sidecar: {str(e)}"
 

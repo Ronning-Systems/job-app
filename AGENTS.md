@@ -57,7 +57,7 @@ deploy — the goal is to unblock production.
 
 The test stack attaches to TWO Docker networks:
 
-- `proxy-test` — created by `my-stack/portainer/stacks/network-test.yml`.
+- `proxy-test` — created by `my-stack/compose/network-test.yml`.
   Carries the test Traefik + all 5 test services. Test-side DNS
   isolation: api-test cannot resolve prod's services by name.
 - `proxy` — the SHARED prod network. Only `secrets-fetcher-test`
@@ -142,9 +142,9 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   resume was generated before template atoms existed — Regenerate once
   to populate both tabs from a single LLM call.
 - **README/agent docs**: `docs/superpowers/` contains design notes. The
-  Portainer / patrick-mini deploy spec
-  (`2026-07-18-portainer-deploy-design.md`) describes the architecture
-  still in use today. Older Cloud Run specs/plans are historical only.
+  appliance-convention spec (`docs/appliance-spec.md` in my-stack)
+  describes the current architecture; the older
+  (`2026-07-18-portainer-deploy-design.md`) is historical only.
 
 ## New tables, agents, and routes (2026-07-25 redesign)
 
@@ -174,10 +174,11 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   fetcher sidecar (Playwright+chromium) for blocked boards (LinkedIn,
   Indeed).
 - **`FETCHER_URL` env var** (default `http://fetcher:8080`): the
-  headless-browser sidecar. The sidecar itself lives in this repo
-  (`sidecars/fetcher/`); the my-stack deploy script builds and brings
-  it up but doesn't define its behavior. Internal-only; not exposed
-  by Traefik.
+  headless-browser sidecar. The sidecar source lives in
+  `my-stack/appliances/fetcher/` (the single source of truth — the
+  my-stack deploy script's step 6 enforces this with a drift check
+  that fails the build if `sidecars/fetcher/` re-appears in this
+  repo). Internal-only; not exposed by Traefik.
 - **Parser extensions** in `backend/job_parser.py`:
   `_extract_pay_range`, `_extract_application_deadline`, improved
   `_extract_credentials`. Structured pay range (`pay_range_min/max`,
@@ -186,15 +187,21 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
 - **Sort-by-attribute:** `GET /api/jobs?sort=company|position|location|
   stage|applied_date|deadline|pay|created&order=asc|desc`.
 
-## Sidecars (added 2026-07-28)
+## Sidecars (added 2026-07-28, refactored 2026-08-24 to appliance convention)
 
-- **Layout:** `sidecars/{fetcher,autoapply}/` — each is a
-  self-contained subproject with Dockerfile, source, and (where
-  applicable) tests. See `sidecars/README.md` for the build
-  contract.
-- **Build:** the my-stack deploy script rsyncs each subdir to
-  patrick-mini and runs `docker buildx build` in it. Image names
-  are `jobapp-<name>:${IMAGE_TAG}`.
+- **Source location:** sidecar source (Dockerfile + .py + manifest)
+  lives in `my-stack/appliances/<name>/`, NOT in this repo. As of
+  2026-08-24, the single source of truth is the appliance convention
+  under `my-stack/appliances/<name>/` (Dockerfile + source + manifest).
+  The my-stack deploy script (`deploy-patrick-mini.sh` step 6) enforces
+  this with a drift check that fails the build if a `sidecars/<name>/`
+  subtree re-appears in either repo.
+- **Layout:** `my-stack/appliances/<name>/{Dockerfile,<name>.py,
+  appliance.md[,requirements.txt,tests/]}` — every appliance is a
+  directory with the Dockerfile inside (not a flat-file tree).
+- **Build:** the my-stack deploy script rsyncs each appliance's tree
+  to patrick-mini and runs `docker buildx build`. Image names are
+  `ronning/<name>:${IMAGE_TAG}`.
 - **Runtime:** declared in this repo's `docker-compose.yml`
   (prod) and `docker-compose.test.yml` (test) as services on
   the external `proxy` network. The my-stack deploy script
@@ -203,10 +210,8 @@ automatically on startup via `models.init_db()` → `alembic upgrade head`.
   suffixes on every service + container_name so prod and test
   can run in parallel on the same `proxy` network without DNS
   collisions.
-- **Auth:** fetcher has no auth (callable only from the internal
-  proxy network). Auto-apply uses HMAC-SHA256; the secret is
-  materialized by the my-stack deploy script and mounted as a
-  Docker secret into both the sidecar and the api container.
+- **Auth:** the fetcher has no auth (callable only from the internal
+  proxy network).
 - **Health:** every sidecar exposes `GET /healthz` (unauth).
   `GET /api/health/system` on the api service probes every
   sidecar + postgres + ollama and returns one 200/503 the
