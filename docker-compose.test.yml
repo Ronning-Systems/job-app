@@ -120,7 +120,14 @@ services:
     networks:
       - proxy-test
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
+      # python3, not python: ronning/fetcher is built FROM the
+      # playwright-base appliance (chromium + OS deps, no python) and
+      # installs the Debian python3 package, which provides no bare
+      # `python` on PATH. A `python` probe fails with "executable file
+      # not found in $PATH" on every interval, so the container is
+      # marked unhealthy even though /healthz answers 200 — which then
+      # fails api-test's depends_on: service_healthy gate.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
       interval: 15s
       timeout: 5s
       retries: 5
